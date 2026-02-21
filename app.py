@@ -271,10 +271,10 @@ def health():
 
 @app.route("/webhook/jira", methods=["POST"])
 def webhook_jira():
-    # Validate secret
+    # Validate secret (se configurado e se o header foi enviado)
     if WEBHOOK_SECRET:
         header_secret = request.headers.get("X-Atlassian-Webhook-Identifier", "")
-        if header_secret != WEBHOOK_SECRET:
+        if header_secret and header_secret != WEBHOOK_SECRET:
             log.warning("Webhook secret invalido")
             return jsonify({"error": "unauthorized"}), 401
 
