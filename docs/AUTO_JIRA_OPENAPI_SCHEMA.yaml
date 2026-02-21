@@ -4,7 +4,7 @@ info:
   description: API middleware para o Auto-Jira. Centraliza acesso ao Jira e Telegram sem expor tokens diretamente.
   version: 2.0.0
 servers:
-  - url: https://auto-jira-production.up.railway.app
+  - url: https://auto-jira-nexus-p2p-api.up.railway.app
     description: Railway production
 
 paths:
