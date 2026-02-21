@@ -6,7 +6,7 @@ info:
     sem expor tokens diretamente. Usado como backend para ChatGPT Actions.
   version: 2.0.0
 servers:
-  - url: https://YOUR-APP.up.railway.app
+  - url: https://auto-jira-production.up.railway.app
     description: Railway production
 
 security:
@@ -351,6 +351,22 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  status:
+                    type: string
+                    description: "transitioned" quando executada
+                  key:
+                    type: string
+                  available_transitions:
+                    type: array
+                    description: Lista de transitions disponiveis (quando sem body)
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
 
   /api/telegram/send:
     post:
@@ -382,6 +398,21 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  ok:
+                    type: boolean
+                  result:
+                    type: object
+                    properties:
+                      message_id:
+                        type: integer
+                      chat:
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                      text:
+                        type: string
 
   /api/telegram/send-photo:
     post:
@@ -499,3 +530,34 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  ok:
+                    type: boolean
+                  result:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        update_id:
+                          type: integer
+                        message:
+                          type: object
+                          properties:
+                            message_id:
+                              type: integer
+                            from:
+                              type: object
+                              properties:
+                                id:
+                                  type: integer
+                                username:
+                                  type: string
+                            chat:
+                              type: object
+                              properties:
+                                id:
+                                  type: integer
+                            text:
+                              type: string
+                            date:
+                              type: integer
