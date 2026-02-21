@@ -1,11 +1,29 @@
 # Auto-Jira
 
-Servico de notificacoes automaticas do Jira no Telegram via webhooks.
-Recebe eventos em tempo real e envia mensagens formatadas para seu grupo/chat no Telegram.
+Automacao completa do Jira Cloud para o projeto KAN da MHX Digital.
+Webhook em tempo real para Telegram + scripts de gerenciamento + documentacao do projeto.
+
+**Instancia:** https://mhxdigital.atlassian.net
+**Projeto:** KAN (team-managed)
+**Deploy webhook:** Railway (Dockerfile)
 
 ---
 
-## Como Funciona
+## Sumario
+
+- [Arquitetura](#arquitetura)
+- [Webhook (Telegram)](#webhook-telegram)
+- [Deploy no Railway](#deploy-no-railway)
+- [Scripts Ativos](#scripts-ativos)
+- [Documentacao do Projeto](#documentacao-do-projeto)
+- [Estado Atual do Jira](#estado-atual-do-jira)
+- [Restricoes Tecnicas da API](#restricoes-tecnicas-da-api)
+- [Desenvolvimento Local](#desenvolvimento-local)
+- [Estrutura de Pastas](#estrutura-de-pastas)
+
+---
+
+## Arquitetura
 
 ```
 Jira Cloud --webhook--> Railway (Flask/Gunicorn) --API--> Telegram Bot
@@ -18,134 +36,241 @@ Jira Cloud --webhook--> Railway (Flask/Gunicorn) --API--> Telegram Bot
                      Envia para o chat
 ```
 
-### Eventos Monitorados
+### Eventos monitorados
 
 | Evento | Descricao |
 |--------|-----------|
 | Issue criada | Nova tarefa, story, epic, etc |
-| Status alterado | Mudanca de coluna no board |
+| Status alterado | Mudanca de coluna (A fazer / Em andamento / Concluido) |
 | Responsavel alterado | Troca de assignee |
 | Prioridade alterada | Mudanca de prioridade |
 | Comentario criado | Novo comentario em issue |
 | Issue deletada | Remocao de issue |
 
-### Exemplo de Notificacao
+### Formato da notificacao
 
 ```
 [JIRA] Status Alterado
 
-KAN-170 — 2FA (TOTP)
-————————————————————————
+KAN-170 -- 2FA (TOTP)
+------------------------
 A fazer  >>  Em andamento
 Por: Maike Henrique
 Abrir no Jira
 21/02/2026 15:30
 ```
 
+### Seguranca
+
+- **Webhook Secret:** Validacao via header (opcional)
+- **Rate Limiting:** Max 60 mensagens/minuto
+- **Filtro por Projeto:** Apenas issues do KAN sao processadas
+
 ---
 
 ## Deploy no Railway
 
-### 1. Criar o Servico
+### 1. Criar servico
 
 1. Acesse [railway.app](https://railway.app) e crie um novo projeto
-2. Conecte este repositorio GitHub
+2. Conecte o repositorio GitHub: `MHX-Digital/Auto-Jira`
 3. O Railway detecta o `Dockerfile` automaticamente
 
 ### 2. Configurar Variables
 
-No dashboard do Railway, adicione as seguintes variaveis em **Variables**:
+No dashboard do Railway, em **Variables**:
 
 | Variavel | Descricao | Obrigatorio |
 |----------|-----------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Token do bot (@BotFather) | Sim |
 | `TELEGRAM_CHAT_ID` | ID do chat/grupo | Sim |
-| `JIRA_BASE_URL` | URL do Jira (ex: `https://empresa.atlassian.net`) | Sim |
-| `JIRA_PROJECT_KEY` | Chave do projeto (ex: `KAN`) | Sim |
-| `WEBHOOK_SECRET` | Secret para validar webhooks (opcional) | Nao |
+| `JIRA_BASE_URL` | `https://mhxdigital.atlassian.net` | Sim |
+| `JIRA_PROJECT_KEY` | `KAN` | Sim |
+| `WEBHOOK_SECRET` | UUID para validar requests (opcional) | Nao |
 
-### 3. Registrar Webhook no Jira
+### 3. Registrar webhook no Jira
 
-Apos o deploy, copie a URL gerada pelo Railway (ex: `https://auto-jira-xxx.up.railway.app`).
+Apos o deploy, com a URL do Railway:
 
-**Via interface do Jira:**
-
-1. Acesse: `Settings > System > Webhooks`
-   Ou diretamente: `https://SEU-DOMINIO.atlassian.net/plugins/servlet/webhooks`
+1. Acesse: `Settings > System > Webhooks` no Jira
+   Ou: `https://mhxdigital.atlassian.net/plugins/servlet/webhooks`
 2. Clique em **Create a webhook**
 3. Configure:
    - **Name:** `Auto-Jira Telegram`
-   - **URL:** `https://SUA-URL-RAILWAY.up.railway.app/webhook/jira`
-   - **Events:** Marque:
-     - Issue: created, updated, deleted
-     - Comment: created
+   - **URL:** `https://SUA-URL.up.railway.app/webhook/jira`
+   - **Events:** Issue created/updated/deleted + Comment created
    - **JQL Filter:** `project = KAN`
 4. Salve
-
-**Via script (alternativo):**
-
-```bash
-python scripts/jira_register_webhook.py --register https://SUA-URL-RAILWAY.up.railway.app
-```
 
 ### 4. Testar
 
 ```bash
-# Testa se o servico esta online
-python scripts/jira_register_webhook.py --test https://SUA-URL-RAILWAY.up.railway.app
-
-# Ou via curl
-curl https://SUA-URL-RAILWAY.up.railway.app/
+python scripts/jira_register_webhook.py --test https://SUA-URL.up.railway.app
 ```
 
-Depois, altere o status de qualquer issue no Jira e verifique o Telegram.
+Ou altere o status de qualquer issue no Jira e verifique o Telegram.
 
 ---
 
-## Configurar Bot do Telegram
+## Scripts Ativos
 
-Se voce ainda nao tem um bot:
+Scripts para gerenciamento local do projeto (rodam na maquina, nao no Railway).
+Todos leem `.env` da raiz do projeto.
 
-1. Abra o Telegram e fale com [@BotFather](https://t.me/BotFather)
-2. Envie `/newbot` e siga as instrucoes
-3. Copie o **token** gerado
-4. Crie um grupo e adicione o bot, ou inicie conversa direta
-5. Para descobrir o `chat_id`:
-   ```bash
-   curl https://api.telegram.org/bot<SEU_TOKEN>/getUpdates
-   ```
-   Procure por `"chat":{"id": ...}`
+| Script | Descricao | Uso |
+|--------|-----------|-----|
+| `jira_register_webhook.py` | Registra/lista/deleta webhooks no Jira | `--register URL`, `--list`, `--delete ID`, `--test URL` |
+| `jira_move_status.py` | Move issues para qualquer status via CLI | `"Em andamento" KAN-170 KAN-171` |
+| `jira_set_in_progress.py` | Batch: move issues para "Em andamento" | (sem args) |
+| `jira_set_duedates.py` | Atribui due dates 30/60/90 dias | (sem args) |
+| `jira_telegram_notify.py` | Resumo + alertas de deadline no Telegram | `--setup`, `--deadlines` |
+| `jira_daily_telegram.py` | Resumo diario completo (8h + 19h) | `--test`, `--install`, `--uninstall` |
+| `jira_nexusp2p_update.py` | Cria/atualiza 26 tasks pos-beta NexusP2P | `--dry-run` |
+| `jira_kan13_v2_update.py` | Atualiza plano 90 dias LexNotify | `--dry-run` |
+| `jira_kan13_90day_plan.py` | v1 do plano 90 dias (superseded by v2) | (sem args) |
+| `jira_move_subtasks_to_in_progress.py` | Move subtasks para "Em andamento" | (sem args) |
+| `gerar_auth_chatgpt.py` | Gera base64 auth para ChatGPT Actions | (sem args) |
 
----
-
-## Scripts Utilitarios
-
-Scripts para gerenciamento local do projeto Jira (rodam na sua maquina, nao no Railway):
-
-| Script | Descricao |
-|--------|-----------|
-| `jira_register_webhook.py` | Registra/lista/deleta webhooks no Jira |
-| `jira_telegram_notify.py` | Resumo diario + alertas de deadline no Telegram |
-| `jira_move_status.py` | Move issues para qualquer status via CLI |
-| `jira_set_duedates.py` | Atribui due dates em batch |
-| `jira_set_in_progress.py` | Move issues para "Em andamento" em batch |
-| `jira_nexusp2p_update.py` | Atualiza tarefas do NexusP2P |
-| `jira_kan13_v2_update.py` | Atualiza plano LexNotify |
-| `jira_daily_telegram.py` | Resumo diario completo do projeto |
-
-### Uso dos Scripts
+### Instalar dependencias
 
 ```bash
-# Instalar dependencias
 pip install requests python-dotenv
+```
 
-# Copiar e preencher .env
-cp .env.example .env
+---
 
-# Exemplos
-python scripts/jira_move_status.py "Em andamento" KAN-170 KAN-171
-python scripts/jira_telegram_notify.py --setup
-python scripts/jira_register_webhook.py --list
+## Documentacao do Projeto
+
+Arquivos em `docs/` para manter contexto entre sessoes.
+
+| Arquivo | Conteudo |
+|---------|---------|
+| `JIRA_SESSAO_COMPLETA.md` | Registro completo de execucao: restricoes API, boards, componentes, epics, issues criadas por sessao, JQLs uteis, labels padrao, contexto estrategico |
+| `NEXUSP2P_COMPLETO.md` | NexusP2P: 5 sprints pos-beta (mar-jun 2026), 26 tasks, stack, dependencias externas, progresso por fase |
+| `JIRA_INTEGRACAO_COMPLETA.md` | Documentacao operacional da API: endpoints, payloads, exemplos, contrato ADF |
+| `GPT_INSTRUCTIONS_AXEROLD.md` | Instrucoes do GPT Bobby Axerold (estrategia + integracao Telegram/Jira) |
+| `JIRA_OPENAPI_SCHEMA.yaml` | Schema OpenAPI 3.1 para integracao ChatGPT Actions com Jira |
+| `TELEGRAM_OPENAPI_SCHEMA.yaml` | Schema OpenAPI para integracao ChatGPT Actions com Telegram |
+| `schema.txt` | Schema de referencia |
+| `epics.json` | Dump JSON dos 30 epics com metadados |
+
+### Para continuar de onde parou
+
+1. Leia `docs/JIRA_SESSAO_COMPLETA.md` — tem todo o historico de execucao, issues criadas, restricoes tecnicas
+2. Leia `docs/NEXUSP2P_COMPLETO.md` — estado completo do NexusP2P com 5 sprints planejados
+3. Veja a secao [Estado Atual](#estado-atual-do-jira) abaixo para o snapshot mais recente
+
+---
+
+## Estado Atual do Jira
+
+**Ultima atualizacao:** 2026-02-21
+
+### Numeros gerais
+
+- ~195 issues (KAN-1 a KAN-195, KAN-56 deletada)
+- 31 Epics
+- 6 Componentes: GOV, OTC, DELIVERY, PRODUCT, LIQUIDATION, QUANT
+- 3 Boards: 1 (simple), 2 (OPERATIONS), 3 (PRODUCT)
+
+### Projetos principais
+
+**KAN-13 — LexNotify AI** (plano 90 dias)
+
+| Fase | Issues | Status | Deadline |
+|------|--------|--------|----------|
+| P0 (30d) | KAN-100, 101, 102, 106, 107, 162, 168 | Em andamento | 2026-03-20 |
+| P1 (60d) | KAN-105, 164, 165, 169 | A fazer | 2026-04-19 |
+| P2 (90d) | KAN-55, 57, 103, 104, 166, 167 | A fazer | 2026-05-19 |
+| Done | KAN-163 (Billing Stripe), seguranca, legal | Concluido | -- |
+
+**KAN-15 — NexusP2P** (pos-beta, 26 tasks)
+
+| Sprint | Issues | Foco | Deadline |
+|--------|--------|------|----------|
+| 1 Seguranca | KAN-170~173, 193 | 2FA, sessoes, reCAPTCHA, rate limit | 2026-03-31 |
+| 2 Pagamentos | KAN-174~177 | PIX BB API, webhooks, WebSocket | 2026-04-30 |
+| 3 Comunicacao | KAN-178~180 | Email, SMS, notificacoes | 2026-05-15 |
+| 4 Tecnico | KAN-181~186, 189~190, 194 | Zustand, TanStack, testes, CI/CD | 2026-05-31 |
+| 5 Admin | KAN-187~188, 191~192, 195 | KYC OCR, APM, backup, painel admin | 2026-06-30 |
+
+Beta: KAN-61, 62, 63 concluidas.
+
+### Mapa Repositorio -> Epic
+
+| Repositorio | Epic | Componente |
+|-------------|------|------------|
+| LexNotify | KAN-13 | PRODUCT |
+| Hamza Carbon | KAN-14 | PRODUCT |
+| NexusP2P | KAN-15 | PRODUCT |
+| InceptionPsi | KAN-16 | PRODUCT |
+| Shadpay | KAN-17 | PRODUCT |
+| MHX-Digital | KAN-129 | PRODUCT |
+| SideWallet | KAN-10 | DELIVERY |
+| BahiaGold | KAN-11 | DELIVERY |
+| Kahincorp-AI | KAN-138 | QUANT |
+| APP Fintech | KAN-18 | LIQUIDATION |
+| Vrumm | KAN-19 | LIQUIDATION |
+| VotoMap | KAN-20 | LIQUIDATION |
+
+### Labels padrao
+
+| Label | Uso |
+|-------|-----|
+| p1, p2, p3 | Prioridade |
+| infra | Infraestrutura / DevOps |
+| legal | Juridico / compliance |
+| security | Seguranca |
+| blocked | Bloqueado |
+| waiting_partner | Esperando parceiro externo |
+| waiting_client | Esperando cliente |
+
+### Contexto estrategico
+
+| Item | Valor |
+|------|-------|
+| Meta de caixa | R$150.000 em 3-4 entradas |
+| Receitas prioritarias | OTC e Licitacao |
+| Stack padrao | Supabase + Auth + Meta Cloud API + GitHub Actions + Sentry |
+| Kill-switch | 30% perda por estrategia E por mes |
+| Alocacao quant | US$100/estrategia inicial |
+| Alavancagem max | 2x futuros, 1x spot |
+| WIP | Max 2 cards Doing por board por pessoa |
+
+---
+
+## Restricoes Tecnicas da API
+
+| Restricao | Detalhe |
+|-----------|---------|
+| Search API | `/rest/api/3/search` retorna **410 Gone**. Usar `/rest/api/3/search/jql` com `nextPageToken` |
+| Paginacao | Usar `nextPageToken` (NAO `startAt`) |
+| Descricao | Obrigatorio **ADF** (Atlassian Document Format), nao texto puro |
+| Issue types | PT-BR: `Tarefa`, `Historia`. Subtask type = `Subtask` (ingles) |
+| Parent field | Usar `"parent": {"key": "KAN-xxx"}` (nao epic link custom field) |
+| Board config | Team-managed: colunas e workflows NAO configuraveis via API |
+| Ranking | `PUT /rest/agile/1.0/issue/rank` aceita request mas nao surte efeito em team-managed |
+| Auth | Basic: `base64(email:api_token)` |
+| Transitions | Nomes com acentos — usar fuzzy match (`'conclu' in name.lower()`) |
+
+### JQLs uteis
+
+```
+-- P1 por board
+project = KAN AND labels = p1 AND component in (PRODUCT, LIQUIDATION, QUANT)
+project = KAN AND labels = p1 AND component in (GOV, OTC, DELIVERY)
+
+-- Deadlines
+project = KAN AND duedate >= now() AND duedate <= 7d ORDER BY duedate ASC
+
+-- Status
+project = KAN AND status = "Em andamento" ORDER BY priority DESC
+
+-- Orfaos
+project = KAN AND issuetype not in (Epic) AND parent is EMPTY
+
+-- Atualizadas hoje
+project = KAN AND updated >= startOfDay() ORDER BY updated DESC
 ```
 
 ---
@@ -157,73 +282,85 @@ python scripts/jira_register_webhook.py --list
 git clone https://github.com/MHX-Digital/Auto-Jira.git
 cd Auto-Jira
 
-# Instalar dependencias
+# Dependencias
 pip install -r requirements.txt
 
 # Configurar .env
 cp .env.example .env
-# Edite .env com seus tokens
+# Preencha com seus tokens
 
-# Rodar servidor local
+# Rodar webhook local
 python app.py
 
-# Testar webhook localmente (outra aba)
+# Testar webhook
 curl -X POST http://localhost:5000/webhook/jira \
   -H "Content-Type: application/json" \
   -d '{"webhookEvent":"jira:issue_updated","issue":{"key":"KAN-1","fields":{"summary":"Teste"}},"user":{"displayName":"Dev"},"changelog":{"items":[{"field":"status","fromString":"A fazer","toString":"Em andamento"}]}}'
 ```
 
-### Docker Local
+### Docker local
 
 ```bash
 docker build -t auto-jira .
 docker run -p 8080:8080 --env-file .env auto-jira
 ```
 
----
-
-## Endpoints
+### Endpoints
 
 | Metodo | Rota | Descricao |
 |--------|------|-----------|
-| `GET` | `/` | Health check (status + uptime) |
-| `POST` | `/webhook/jira` | Recebe webhooks do Jira |
+| GET | `/` | Health check (status + uptime) |
+| POST | `/webhook/jira` | Recebe webhooks do Jira |
 
 ---
 
-## Seguranca
-
-- **Webhook Secret:** Configure `WEBHOOK_SECRET` para validar que requests vem do Jira
-- **Rate Limiting:** Max 60 mensagens/minuto para evitar flood
-- **Filtro por Projeto:** Apenas issues do projeto configurado sao processadas
-- **Dados sensiveis:** `.env` no `.gitignore`, nunca suba tokens para o repositorio
-
----
-
-## Estrutura
+## Estrutura de Pastas
 
 ```
 Auto-Jira/
-|-- app.py              # Servico Flask (webhook receiver)
-|-- Dockerfile          # Build para Railway
-|-- requirements.txt    # Dependencias Python
-|-- railway.toml        # Config Railway
-|-- .env.example        # Template de variaveis
-|-- .gitignore          # Protecao de dados sensiveis
-|-- README.md           # Este arquivo
-+-- scripts/            # Scripts utilitarios (uso local)
-    |-- jira_register_webhook.py
-    |-- jira_telegram_notify.py
-    |-- jira_move_status.py
-    |-- jira_set_duedates.py
-    |-- jira_set_in_progress.py
-    |-- jira_nexusp2p_update.py
-    |-- jira_kan13_v2_update.py
-    |-- jira_kan13_90day_plan.py
-    |-- jira_daily_telegram.py
-    +-- jira_move_subtasks_to_in_progress.py
+|-- app.py                  # Webhook Flask (deploy Railway)
+|-- Dockerfile              # Build para Railway
+|-- requirements.txt        # flask, gunicorn, requests
+|-- railway.toml            # Config Railway
+|-- .env.example            # Template de variaveis
+|-- .gitignore              # Protege .env e dados sensiveis
+|-- README.md               # Este arquivo
+|
+|-- scripts/                # Scripts utilitarios (uso local)
+|   |-- jira_register_webhook.py
+|   |-- jira_move_status.py
+|   |-- jira_set_in_progress.py
+|   |-- jira_set_duedates.py
+|   |-- jira_telegram_notify.py
+|   |-- jira_daily_telegram.py
+|   |-- jira_nexusp2p_update.py
+|   |-- jira_kan13_v2_update.py
+|   |-- jira_kan13_90day_plan.py
+|   |-- jira_move_subtasks_to_in_progress.py
+|   +-- gerar_auth_chatgpt.py
+|
+|-- docs/                   # Documentacao e referencia
+|   |-- JIRA_SESSAO_COMPLETA.md
+|   |-- NEXUSP2P_COMPLETO.md
+|   |-- JIRA_INTEGRACAO_COMPLETA.md
+|   |-- GPT_INSTRUCTIONS_AXEROLD.md
+|   |-- JIRA_OPENAPI_SCHEMA.yaml
+|   |-- TELEGRAM_OPENAPI_SCHEMA.yaml
+|   |-- schema.txt
+|   +-- epics.json
+|
++-- _archive/               # Scripts legados (referencia historica)
+    |-- jira_executor.py
+    |-- jira_audit_v2.py
+    |-- jira_config.py
+    |-- jira_fix_kahincorp.py
+    |-- jira_operacao_poder.py
+    |-- jira_passo234.py
+    |-- jira_rank.py
+    |-- jira_repos_pendentes.py
+    +-- verify.py
 ```
 
 ---
 
-**MHX Digital** — Automacao Jira + Telegram
+**MHX Digital** -- Automacao Jira + Telegram

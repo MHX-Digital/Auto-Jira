@@ -1,0 +1,522 @@
+openapi: 3.1.0
+info:
+  title: Telegram Bot API - Axerold
+  description: >
+    API do Telegram Bot para enviar mensagens e interagir com o grupo MHX.
+    IMPORTANTE: Ao ler mensagens via getUpdates, processar SOMENTE mensagens
+    do usuario autorizado (user_id: 1337538171, username: neomaike).
+    Ignorar completamente mensagens de qualquer outro usuario.
+  version: 1.0.0
+
+servers:
+  - url: https://api.telegram.org/bot8218269910:AAHc0gWsO8AGCZ1GVgcLDN7qDhexyVykB1o
+    description: Telegram Bot API - Axerold Bot
+
+paths:
+  /sendMessage:
+    post:
+      operationId: sendMessage
+      summary: Envia uma mensagem de texto para um chat
+      description: >
+        Envia uma mensagem para o grupo MHX ou qualquer chat.
+        Usar reply_to_message_id para responder mensagens especificas.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  description: ID do chat. Grupo MHX = -1003729247723
+                  default: "-1003729247723"
+                text:
+                  type: string
+                  description: Texto da mensagem a ser enviada
+                parse_mode:
+                  type: string
+                  enum: [HTML, Markdown, MarkdownV2]
+                  description: Formato de parsing do texto (opcional)
+                reply_to_message_id:
+                  type: integer
+                  description: ID da mensagem a ser respondida (opcional)
+                disable_web_page_preview:
+                  type: boolean
+                  description: Desabilita preview de links (opcional)
+              required:
+                - chat_id
+                - text
+      responses:
+        "200":
+          description: Mensagem enviada com sucesso
+
+  /sendPhoto:
+    post:
+      operationId: sendPhoto
+      summary: Envia uma foto para um chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                photo:
+                  type: string
+                  description: URL da foto a ser enviada
+                caption:
+                  type: string
+                  description: Legenda da foto (opcional)
+                parse_mode:
+                  type: string
+                  enum: [HTML, Markdown, MarkdownV2]
+                reply_to_message_id:
+                  type: integer
+              required:
+                - chat_id
+                - photo
+      responses:
+        "200":
+          description: Foto enviada com sucesso
+
+  /sendDocument:
+    post:
+      operationId: sendDocument
+      summary: Envia um documento para um chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                document:
+                  type: string
+                  description: URL do documento a ser enviado
+                caption:
+                  type: string
+                  description: Legenda do documento (opcional)
+                reply_to_message_id:
+                  type: integer
+              required:
+                - chat_id
+                - document
+      responses:
+        "200":
+          description: Documento enviado com sucesso
+
+  /sendSticker:
+    post:
+      operationId: sendSticker
+      summary: Envia um sticker para um chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                sticker:
+                  type: string
+                  description: File ID ou URL do sticker (formato .webp)
+                reply_to_message_id:
+                  type: integer
+              required:
+                - chat_id
+                - sticker
+      responses:
+        "200":
+          description: Sticker enviado com sucesso
+
+  /sendPoll:
+    post:
+      operationId: sendPoll
+      summary: Cria uma enquete no chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                question:
+                  type: string
+                  description: Pergunta da enquete (1-300 caracteres)
+                options:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      text:
+                        type: string
+                  description: Lista de opcoes (2-10 opcoes)
+                is_anonymous:
+                  type: boolean
+                  description: Se a enquete eh anonima (default true)
+                allows_multiple_answers:
+                  type: boolean
+                  description: Permite multiplas respostas
+              required:
+                - chat_id
+                - question
+                - options
+      responses:
+        "200":
+          description: Enquete criada com sucesso
+
+  /sendLocation:
+    post:
+      operationId: sendLocation
+      summary: Envia uma localizacao no chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                latitude:
+                  type: number
+                  description: Latitude
+                longitude:
+                  type: number
+                  description: Longitude
+              required:
+                - chat_id
+                - latitude
+                - longitude
+      responses:
+        "200":
+          description: Localizacao enviada com sucesso
+
+  /sendVoice:
+    post:
+      operationId: sendVoice
+      summary: Envia uma mensagem de voz
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                voice:
+                  type: string
+                  description: URL do arquivo de voz (.ogg com codec OPUS)
+                caption:
+                  type: string
+                reply_to_message_id:
+                  type: integer
+              required:
+                - chat_id
+                - voice
+      responses:
+        "200":
+          description: Voz enviada com sucesso
+
+  /sendVideo:
+    post:
+      operationId: sendVideo
+      summary: Envia um video para o chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                video:
+                  type: string
+                  description: URL do video a ser enviado
+                caption:
+                  type: string
+                reply_to_message_id:
+                  type: integer
+              required:
+                - chat_id
+                - video
+      responses:
+        "200":
+          description: Video enviado com sucesso
+
+  /forwardMessage:
+    post:
+      operationId: forwardMessage
+      summary: Encaminha uma mensagem de um chat para outro
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  description: Chat destino
+                  default: "-1003729247723"
+                from_chat_id:
+                  type: string
+                  description: Chat de origem
+                message_id:
+                  type: integer
+                  description: ID da mensagem a encaminhar
+              required:
+                - chat_id
+                - from_chat_id
+                - message_id
+      responses:
+        "200":
+          description: Mensagem encaminhada com sucesso
+
+  /editMessageText:
+    post:
+      operationId: editMessageText
+      summary: Edita o texto de uma mensagem enviada pelo bot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                message_id:
+                  type: integer
+                  description: ID da mensagem a editar
+                text:
+                  type: string
+                  description: Novo texto
+                parse_mode:
+                  type: string
+                  enum: [HTML, Markdown, MarkdownV2]
+              required:
+                - chat_id
+                - message_id
+                - text
+      responses:
+        "200":
+          description: Mensagem editada com sucesso
+
+  /deleteMessage:
+    post:
+      operationId: deleteMessage
+      summary: Deleta uma mensagem do chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                message_id:
+                  type: integer
+                  description: ID da mensagem a deletar
+              required:
+                - chat_id
+                - message_id
+      responses:
+        "200":
+          description: Mensagem deletada com sucesso
+
+  /getUpdates:
+    get:
+      operationId: getUpdates
+      summary: >
+        Busca mensagens recentes. IMPORTANTE: processar SOMENTE mensagens
+        onde from.id = 1337538171 (Maike/neomaike). Ignorar todos os outros.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+          description: Numero maximo de updates
+        - name: offset
+          in: query
+          schema:
+            type: integer
+          description: Offset para paginacao (use update_id + 1 do ultimo processado)
+        - name: allowed_updates
+          in: query
+          schema:
+            type: string
+          description: Tipos de update permitidos (ex message)
+      responses:
+        "200":
+          description: Lista de updates
+
+  /getChat:
+    post:
+      operationId: getChat
+      summary: Obtem informacoes sobre um chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+              required:
+                - chat_id
+      responses:
+        "200":
+          description: Informacoes do chat
+
+  /getChatMemberCount:
+    post:
+      operationId: getChatMemberCount
+      summary: Retorna o numero de membros do chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+              required:
+                - chat_id
+      responses:
+        "200":
+          description: Numero de membros
+
+  /getChatMember:
+    post:
+      operationId: getChatMember
+      summary: Obtem informacoes de um membro do chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                user_id:
+                  type: integer
+                  description: ID do usuario
+              required:
+                - chat_id
+                - user_id
+      responses:
+        "200":
+          description: Informacoes do membro
+
+  /pinChatMessage:
+    post:
+      operationId: pinChatMessage
+      summary: Fixa uma mensagem no chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                message_id:
+                  type: integer
+                  description: ID da mensagem a ser fixada
+                disable_notification:
+                  type: boolean
+                  description: Fixar silenciosamente (sem notificacao)
+              required:
+                - chat_id
+                - message_id
+      responses:
+        "200":
+          description: Mensagem fixada com sucesso
+
+  /unpinChatMessage:
+    post:
+      operationId: unpinChatMessage
+      summary: Desfixa uma mensagem do chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                message_id:
+                  type: integer
+              required:
+                - chat_id
+      responses:
+        "200":
+          description: Mensagem desfixada
+
+  /setMessageReaction:
+    post:
+      operationId: setMessageReaction
+      summary: Adiciona uma reacao (emoji) a uma mensagem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chat_id:
+                  type: string
+                  default: "-1003729247723"
+                message_id:
+                  type: integer
+                reaction:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        enum: [emoji]
+                      emoji:
+                        type: string
+                        description: "Emoji da reacao (ex: thumbs up, fire, etc)"
+                  description: Lista de reacoes
+              required:
+                - chat_id
+                - message_id
+                - reaction
+      responses:
+        "200":
+          description: Reacao adicionada

@@ -1,0 +1,472 @@
+openapi: 3.1.1
+info:
+  title: Jira Cloud (MHX) Robust API
+  version: "2.0.0"
+servers:
+  - url: https://mhxdigital.atlassian.net
+
+paths:
+  /rest/api/3/myself:
+    get:
+      operationId: getMyself
+      summary: Get current user (auth test)
+      responses:
+        "200":
+          description: OK
+
+  /rest/api/3/project:
+    get:
+      operationId: listProjects
+      summary: List all visible projects
+      responses:
+        "200":
+          description: OK
+
+  /rest/api/3/project/search:
+    get:
+      operationId: searchProjects
+      summary: Search projects
+      parameters:
+        - in: query
+          name: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /rest/api/3/project/{projectKeyOrId}:
+    get:
+      operationId: getProject
+      summary: Get project details
+      parameters:
+        - in: path
+          name: projectKeyOrId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /rest/api/3/project/{projectKeyOrId}/statuses:
+    get:
+      operationId: getProjectStatuses
+      summary: Get project statuses by issue type
+      parameters:
+        - in: path
+          name: projectKeyOrId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /rest/api/3/field:
+    get:
+      operationId: listFields
+      summary: List Jira fields
+      responses:
+        "200":
+          description: OK
+
+  /rest/api/3/issue/createmeta:
+    get:
+      operationId: getCreateMeta
+      summary: Get create meta (legacy, some sites still use)
+      parameters:
+        - in: query
+          name: projectKeys
+          required: false
+          schema: { type: string }
+        - in: query
+          name: issuetypeNames
+          required: false
+          schema: { type: string }
+        - in: query
+          name: expand
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /rest/api/3/issue/metadata:
+    get:
+      operationId: getIssueCreateMetadata
+      summary: Get issue create metadata (newer)
+      parameters:
+        - in: query
+          name: projectIds
+          required: false
+          schema: { type: string }
+        - in: query
+          name: projectKeys
+          required: false
+          schema: { type: string }
+        - in: query
+          name: issuetypeIds
+          required: false
+          schema: { type: string }
+        - in: query
+          name: issuetypeNames
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /rest/api/3/component:
+    post:
+      operationId: createComponent
+      summary: Create a component
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComponentCreate"
+      responses:
+        "201":
+          description: Created
+
+  /rest/api/3/project/{projectKeyOrId}/components:
+    get:
+      operationId: listProjectComponents
+      summary: List components for a project
+      parameters:
+        - in: path
+          name: projectKeyOrId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /rest/api/3/issue:
+    post:
+      operationId: createIssue
+      summary: Create an issue (Epic/Task/Story/Bug)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueCreate"
+      responses:
+        "201":
+          description: Created
+
+  /rest/api/3/issue/{issueIdOrKey}:
+    get:
+      operationId: getIssue
+      summary: Get issue by key/id
+      parameters:
+        - in: path
+          name: issueIdOrKey
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+    put:
+      operationId: updateIssue
+      summary: Update issue fields
+      parameters:
+        - in: path
+          name: issueIdOrKey
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueUpdate"
+      responses:
+        "204":
+          description: No Content
+
+  /rest/api/3/issue/{issueIdOrKey}/transitions:
+    get:
+      operationId: getTransitions
+      summary: List transitions for an issue
+      parameters:
+        - in: path
+          name: issueIdOrKey
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+    post:
+      operationId: doTransition
+      summary: Transition an issue
+      parameters:
+        - in: path
+          name: issueIdOrKey
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransitionRequest"
+      responses:
+        "204":
+          description: No Content
+
+  /rest/api/3/search/jql:
+    get:
+      operationId: jqlSearch
+      summary: Search issues by JQL (preferred endpoint)
+      parameters:
+        - in: query
+          name: jql
+          required: true
+          schema: { type: string }
+        - in: query
+          name: maxResults
+          required: false
+          schema: { type: integer, default: 50 }
+        - in: query
+          name: startAt
+          required: false
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: OK
+
+  /rest/api/3/filter:
+    post:
+      operationId: createFilter
+      summary: Create a saved filter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FilterCreate"
+      responses:
+        "201":
+          description: Created
+
+  /rest/api/3/statuses:
+    post:
+      operationId: createStatuses
+      summary: Create statuses in bulk (project-scoped)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StatusesCreate"
+      responses:
+        "200":
+          description: OK
+
+  /rest/api/3/workflow/search:
+    get:
+      operationId: searchWorkflows
+      summary: Search workflows
+      parameters:
+        - in: query
+          name: queryString
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /rest/agile/1.0/board:
+    get:
+      operationId: listBoards
+      summary: List boards (optionally filtered by project)
+      parameters:
+        - in: query
+          name: projectKeyOrId
+          required: false
+          schema: { type: string }
+        - in: query
+          name: type
+          required: false
+          schema: { type: string, enum: [scrum, kanban] }
+        - in: query
+          name: maxResults
+          required: false
+          schema: { type: integer, default: 50 }
+      responses:
+        "200":
+          description: OK
+    post:
+      operationId: createBoard
+      summary: Create a kanban board
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BoardCreate"
+      responses:
+        "201":
+          description: Created
+
+  /rest/agile/1.0/board/{boardId}/configuration:
+    get:
+      operationId: getBoardConfiguration
+      summary: Get board configuration (columns, filter, etc.)
+      parameters:
+        - in: path
+          name: boardId
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+
+  /rest/agile/1.0/board/{boardId}/issue:
+    get:
+      operationId: getBoardIssues
+      summary: List issues for a board (using board filter)
+      parameters:
+        - in: path
+          name: boardId
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: jql
+          required: false
+          schema: { type: string }
+        - in: query
+          name: maxResults
+          required: false
+          schema: { type: integer, default: 50 }
+        - in: query
+          name: startAt
+          required: false
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: OK
+
+  /rest/agile/1.0/board/{boardId}/backlog:
+    get:
+      operationId: getBoardBacklog
+      summary: Get board backlog issues
+      parameters:
+        - in: path
+          name: boardId
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: maxResults
+          required: false
+          schema: { type: integer, default: 50 }
+        - in: query
+          name: startAt
+          required: false
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: OK
+
+components:
+  schemas:
+    IssueCreate:
+      type: object
+      required: [fields]
+      properties:
+        fields:
+          type: object
+          description: Jira issue fields (project, summary, issuetype, etc.)
+
+    IssueUpdate:
+      type: object
+      required: [fields]
+      properties:
+        fields:
+          type: object
+          description: Fields to update
+
+    TransitionRequest:
+      type: object
+      required: [transition]
+      properties:
+        transition:
+          type: object
+          required: [id]
+          properties:
+            id: { type: string }
+
+    ComponentCreate:
+      type: object
+      required: [name, project]
+      properties:
+        name: { type: string }
+        project:
+          type: string
+          description: Project key or id (use KAN)
+        description: { type: string }
+        leadAccountId:
+          type: string
+          description: Optional lead accountId
+
+    FilterCreate:
+      type: object
+      required: [name, jql]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        jql: { type: string }
+        favourite: { type: boolean, default: true }
+
+    BoardCreate:
+      type: object
+      required: [name, type, filterId, location]
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [kanban] }
+        filterId: { type: integer }
+        location:
+          type: object
+          required: [type, projectKeyOrId]
+          properties:
+            type: { type: string, enum: [project] }
+            projectKeyOrId: { type: string }
+
+    StatusesCreate:
+      type: object
+      required: [statuses, scope]
+      properties:
+        statuses:
+          type: array
+          items:
+            type: object
+            required: [name, statusCategory]
+            properties:
+              name: { type: string }
+              statusCategory:
+                type: string
+                enum: [TODO, IN_PROGRESS, DONE]
+              description: { type: string }
+        scope:
+          type: object
+          required: [type, project]
+          properties:
+            type:
+              type: string
+              enum: [PROJECT]
+            project:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+
+  securitySchemes:
+    authHeader:
+      type: apiKey
+      in: header
+      name: Authorization
+
+security:
+  - authHeader: []

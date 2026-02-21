@@ -1,0 +1,800 @@
+openapi: 3.1.1
+info:
+  title: Jira Cloud API - MHX Digital
+  description: >
+    API do Jira Cloud para o projeto KAN em mhxdigital.atlassian.net.
+    Cobre operacoes de leitura, criacao, atualizacao e transicao de issues,
+    componentes, boards e busca JQL.
+  version: 1.0.0
+
+servers:
+  - url: https://mhxdigital.atlassian.net
+    description: Instancia Jira Cloud MHX Digital
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: >
+        Basic Auth com email:api_token.
+        No ChatGPT Actions, configure como API Key com header Authorization
+        e valor "Basic <base64(email:token)>".
+
+  schemas:
+    AtlassianDocumentSimple:
+      type: object
+      description: Atlassian Document Format (ADF) simplificado para descricoes
+      properties:
+        type:
+          type: string
+          enum: [doc]
+        version:
+          type: integer
+          enum: [1]
+        content:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [paragraph]
+              content:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                      enum: [text]
+                    text:
+                      type: string
+                  required: [type, text]
+            required: [type, content]
+      required: [type, version, content]
+
+    IssueCreate:
+      type: object
+      description: Payload para criar issue (Epic, Task, Story, Bug)
+      properties:
+        fields:
+          type: object
+          properties:
+            project:
+              type: object
+              properties:
+                key:
+                  type: string
+                  description: Chave do projeto (ex KAN)
+              required: [key]
+            summary:
+              type: string
+              description: Titulo da issue
+            issuetype:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: "Nome do tipo: Epic, Tarefa, Historia, Bug, Subtask, Feature, Request"
+              required: [name]
+            description:
+              $ref: "#/components/schemas/AtlassianDocumentSimple"
+            components:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    description: Nome do componente (GOV, OTC, DELIVERY, PRODUCT, LIQUIDATION, QUANT)
+                required: [name]
+            labels:
+              type: array
+              items:
+                type: string
+              description: "Labels: p1, p2, p3, blocked, waiting_partner, waiting_client, legal, security, infra, hotfix"
+            priority:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: "Highest, High, Medium, Low, Lowest"
+              required: [name]
+            assignee:
+              type: object
+              properties:
+                accountId:
+                  type: string
+              required: [accountId]
+            parent:
+              type: object
+              description: Epic pai (para vincular tasks a epics)
+              properties:
+                key:
+                  type: string
+                  description: Key do epic pai (ex KAN-13)
+              required: [key]
+          required: [project, summary, issuetype]
+      required: [fields]
+
+    IssueUpdate:
+      type: object
+      description: Payload para atualizar issue
+      properties:
+        fields:
+          type: object
+          properties:
+            summary:
+              type: string
+            description:
+              $ref: "#/components/schemas/AtlassianDocumentSimple"
+            labels:
+              type: array
+              items:
+                type: string
+            priority:
+              type: object
+              properties:
+                name:
+                  type: string
+              required: [name]
+            assignee:
+              type: object
+              properties:
+                accountId:
+                  type: string
+              required: [accountId]
+        update:
+          type: object
+          description: Operacoes de update granular (add/remove/set)
+          properties:
+            labels:
+              type: array
+              items:
+                type: object
+                properties:
+                  add:
+                    type: string
+                  remove:
+                    type: string
+            components:
+              type: array
+              items:
+                type: object
+                properties:
+                  add:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                    required: [name]
+                  remove:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                    required: [name]
+
+    TransitionRequest:
+      type: object
+      description: Payload para transicionar issue de status
+      properties:
+        transition:
+          type: object
+          properties:
+            id:
+              type: string
+              description: ID da transicao (obter via GET transitions)
+          required: [id]
+      required: [transition]
+
+    ComponentCreate:
+      type: object
+      description: Payload para criar componente
+      properties:
+        name:
+          type: string
+          description: Nome do componente
+        project:
+          type: string
+          description: Chave do projeto (KAN)
+        description:
+          type: string
+        leadAccountId:
+          type: string
+          description: AccountId do lider do componente
+      required: [name, project]
+
+    User:
+      type: object
+      properties:
+        self:
+          type: string
+        accountId:
+          type: string
+        emailAddress:
+          type: string
+        displayName:
+          type: string
+        active:
+          type: boolean
+        timeZone:
+          type: string
+
+    Project:
+      type: object
+      properties:
+        self:
+          type: string
+        id:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+        projectTypeKey:
+          type: string
+        simplified:
+          type: boolean
+
+    Issue:
+      type: object
+      properties:
+        id:
+          type: string
+        key:
+          type: string
+        self:
+          type: string
+        fields:
+          type: object
+          properties:
+            summary:
+              type: string
+            status:
+              type: object
+              properties:
+                name:
+                  type: string
+                id:
+                  type: string
+            issuetype:
+              type: object
+              properties:
+                name:
+                  type: string
+                id:
+                  type: string
+            priority:
+              type: object
+              properties:
+                name:
+                  type: string
+            labels:
+              type: array
+              items:
+                type: string
+            components:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  id:
+                    type: string
+            assignee:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                accountId:
+                  type: string
+            description:
+              $ref: "#/components/schemas/AtlassianDocumentSimple"
+
+    IssueCreatedResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        key:
+          type: string
+        self:
+          type: string
+
+    SearchResults:
+      type: object
+      properties:
+        startAt:
+          type: integer
+        maxResults:
+          type: integer
+        total:
+          type: integer
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/Issue"
+
+    Component:
+      type: object
+      properties:
+        self:
+          type: string
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+
+    Transition:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        to:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+
+    Board:
+      type: object
+      properties:
+        id:
+          type: integer
+        self:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+
+    Field:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        custom:
+          type: boolean
+        schema:
+          type: object
+          properties:
+            type:
+              type: string
+            system:
+              type: string
+            custom:
+              type: string
+            customId:
+              type: integer
+
+security:
+  - basicAuth: []
+
+paths:
+  /rest/api/3/myself:
+    get:
+      operationId: getMyself
+      summary: Retorna dados do usuario autenticado
+      description: Usa para validar se a autenticacao esta funcionando. Retorna displayName, email, accountId.
+      responses:
+        "200":
+          description: Dados do usuario
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Nao autenticado
+
+  /rest/api/3/project/search:
+    get:
+      operationId: searchProjects
+      summary: Busca projetos acessiveis
+      parameters:
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: startAt
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Lista de projetos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  values:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Project"
+                  total:
+                    type: integer
+
+  /rest/api/3/project/{projectKeyOrId}:
+    get:
+      operationId: getProject
+      summary: Detalhes de um projeto especifico
+      parameters:
+        - name: projectKeyOrId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Chave (KAN) ou ID do projeto
+        - name: expand
+          in: query
+          schema:
+            type: string
+            default: "description,lead,issueTypes,url,projectKeys"
+      responses:
+        "200":
+          description: Detalhes do projeto com issueTypes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /rest/api/3/search/jql:
+    get:
+      operationId: searchIssuesJql
+      summary: Buscar issues via JQL
+      description: >
+        Executa uma query JQL e retorna issues.
+        Exemplos de JQL:
+        - project = KAN
+        - project = KAN AND component = OTC
+        - project = KAN AND labels = p1 AND status != Done
+        - project = KAN AND issuetype = Epic ORDER BY created DESC
+      parameters:
+        - name: jql
+          in: query
+          required: true
+          schema:
+            type: string
+          description: "Query JQL. Ex: project = KAN AND issuetype = Epic"
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: startAt
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: fields
+          in: query
+          schema:
+            type: string
+          description: "Campos a retornar separados por virgula. Ex: key,summary,status,components,labels,priority,assignee,description"
+      responses:
+        "200":
+          description: Resultado da busca JQL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResults"
+
+  /rest/api/3/issue:
+    post:
+      operationId: createIssue
+      summary: Criar issue (Epic, Task, Story, Bug, Subtask)
+      description: >
+        Cria uma issue no Jira. Para vincular uma task/story a um epic,
+        use o campo parent com a key do epic.
+        O campo description DEVE usar Atlassian Document Format (ADF).
+        Issue types disponiveis no KAN: Epic, Tarefa, Historia, Bug, Subtask, Feature, Request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueCreate"
+      responses:
+        "201":
+          description: Issue criada com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueCreatedResponse"
+        "400":
+          description: Payload invalido
+
+  /rest/api/3/issue/{issueIdOrKey}:
+    get:
+      operationId: getIssue
+      summary: Obter detalhes de uma issue
+      parameters:
+        - name: issueIdOrKey
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "Key (ex: KAN-13) ou ID da issue"
+        - name: fields
+          in: query
+          schema:
+            type: string
+          description: "Campos a retornar. Ex: summary,status,components,labels,description"
+      responses:
+        "200":
+          description: Detalhes da issue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+    put:
+      operationId: updateIssue
+      summary: Atualizar uma issue existente
+      description: >
+        Atualiza campos de uma issue. Pode usar "fields" para setar valores
+        ou "update" para operacoes granulares (add/remove labels, components).
+      parameters:
+        - name: issueIdOrKey
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueUpdate"
+      responses:
+        "204":
+          description: Issue atualizada com sucesso
+        "400":
+          description: Payload invalido
+
+  /rest/api/3/issue/{issueIdOrKey}/transitions:
+    get:
+      operationId: getTransitions
+      summary: Listar transicoes disponiveis para uma issue
+      description: >
+        Retorna as transicoes possiveis a partir do status atual da issue.
+        Use o id da transicao desejada no POST para mover a issue.
+      parameters:
+        - name: issueIdOrKey
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transicoes disponiveis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transitions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Transition"
+    post:
+      operationId: transitionIssue
+      summary: Transicionar issue para outro status
+      description: >
+        Move a issue para outro status. Primeiro chame GET para obter
+        os IDs das transicoes disponiveis, depois use o ID aqui.
+      parameters:
+        - name: issueIdOrKey
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransitionRequest"
+      responses:
+        "204":
+          description: Transicao realizada com sucesso
+
+  /rest/api/3/field:
+    get:
+      operationId: getFields
+      summary: Listar todos os campos disponiveis
+      description: Retorna campos do sistema e campos customizados. Util para descobrir IDs de campos como Epic Link.
+      responses:
+        "200":
+          description: Lista de campos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Field"
+
+  /rest/api/3/issue/createmeta/{projectIdOrKey}/issuetypes:
+    get:
+      operationId: getCreateMeta
+      summary: Metadados de criacao de issue (issue types disponiveis)
+      description: Retorna os issue types disponiveis para criacao no projeto.
+      parameters:
+        - name: projectIdOrKey
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Issue types disponiveis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  issueTypes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        description:
+                          type: string
+                        subtask:
+                          type: boolean
+
+  /rest/api/3/project/{projectKeyOrId}/components:
+    get:
+      operationId: getProjectComponents
+      summary: Listar componentes do projeto
+      parameters:
+        - name: projectKeyOrId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Lista de componentes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Component"
+
+  /rest/api/3/component:
+    post:
+      operationId: createComponent
+      summary: Criar componente no projeto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComponentCreate"
+      responses:
+        "201":
+          description: Componente criado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Component"
+
+  /rest/agile/1.0/board:
+    get:
+      operationId: getBoards
+      summary: Listar boards do projeto
+      parameters:
+        - name: projectKeyOrId
+          in: query
+          schema:
+            type: string
+          description: "Filtrar por projeto. Ex: KAN"
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [scrum, kanban, simple]
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Lista de boards
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  values:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Board"
+
+  /rest/agile/1.0/board/{boardId}/issue:
+    get:
+      operationId: getBoardIssues
+      summary: Listar issues de um board
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: startAt
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: jql
+          in: query
+          schema:
+            type: string
+          description: Filtro JQL adicional
+        - name: fields
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Issues do board
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResults"
+
+  /rest/agile/1.0/board/{boardId}/backlog:
+    get:
+      operationId: getBoardBacklog
+      summary: Listar issues no backlog do board
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: startAt
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: fields
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Issues no backlog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResults"

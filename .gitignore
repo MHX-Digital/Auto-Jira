@@ -19,6 +19,5 @@ venv/
 Thumbs.db
 
 # Project internals
-_archive/
 .claude/
 *.log
