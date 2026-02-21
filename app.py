@@ -1402,7 +1402,7 @@ def api_jira_issue(key):
         "duedate": f.get("duedate"),
         "labels": f.get("labels", []),
         "assignee": (f.get("assignee") or {}).get("displayName"),
-        "description": _extract_adf_text(f.get("description", {})),
+        "description_text": _extract_adf_text(f.get("description", {})),
         "components": [c["name"] for c in f.get("components", [])],
         "created": f.get("created"),
         "updated": f.get("updated"),
@@ -1428,11 +1428,12 @@ def api_jira_create_issue():
         fields["issuetype"] = {"name": data["issuetype"]}
     else:
         fields["issuetype"] = {"name": "Task"}
-    if "description" in data:
+    desc = data.get("issue_description") or data.get("description")
+    if desc:
         fields["description"] = {
             "version": 1,
             "type": "doc",
-            "content": [{"type": "paragraph", "content": [{"type": "text", "text": data["description"]}]}],
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": desc}]}],
         }
     if "priority" in data:
         fields["priority"] = {"name": data["priority"]}
@@ -1465,11 +1466,12 @@ def api_jira_update_issue(key):
     fields = {}
     if "summary" in data:
         fields["summary"] = data["summary"]
-    if "description" in data:
+    desc = data.get("issue_description") or data.get("description")
+    if desc:
         fields["description"] = {
             "version": 1,
             "type": "doc",
-            "content": [{"type": "paragraph", "content": [{"type": "text", "text": data["description"]}]}],
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": desc}]}],
         }
     if "priority" in data:
         fields["priority"] = {"name": data["priority"]}

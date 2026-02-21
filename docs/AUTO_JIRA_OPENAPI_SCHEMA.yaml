@@ -1,87 +1,17 @@
-openapi: 3.1.0
+openapi: 3.0.0
 info:
   title: Auto-Jira API Middleware
-  description: |
-    API middleware para o Auto-Jira. Centraliza acesso ao Jira e Telegram
-    sem expor tokens diretamente. Usado como backend para ChatGPT Actions.
+  description: API middleware para o Auto-Jira. Centraliza acesso ao Jira e Telegram sem expor tokens diretamente.
   version: 2.0.0
 servers:
   - url: https://auto-jira-production.up.railway.app
     description: Railway production
-
-security:
-  - BearerAuth: []
-
-components:
-  securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      description: APP_SECRET_KEY configurado no Railway
-
-  schemas:
-    IssueSimple:
-      type: object
-      properties:
-        key:
-          type: string
-          example: KAN-42
-        summary:
-          type: string
-        status:
-          type: string
-        duedate:
-          type: string
-          nullable: true
-
-    IssueDetail:
-      type: object
-      properties:
-        key:
-          type: string
-        summary:
-          type: string
-        status:
-          type: string
-        issuetype:
-          type: string
-        priority:
-          type: string
-        duedate:
-          type: string
-          nullable: true
-        labels:
-          type: array
-          items:
-            type: string
-        assignee:
-          type: string
-          nullable: true
-        description:
-          type: string
-        components:
-          type: array
-          items:
-            type: string
-        created:
-          type: string
-        updated:
-          type: string
-        link:
-          type: string
-
-    Error:
-      type: object
-      properties:
-        error:
-          type: string
 
 paths:
   /api/health:
     get:
       operationId: getHealth
       summary: Status do servico
-      description: Retorna status, uptime e projeto configurado.
       responses:
         "200":
           description: Servico operacional
@@ -103,7 +33,6 @@ paths:
     get:
       operationId: getJiraStatus
       summary: Resumo rapido do Jira KAN
-      description: Retorna contagens de issues por status e lista das ativas.
       responses:
         "200":
           description: Resumo do projeto
@@ -130,13 +59,17 @@ paths:
                         issues:
                           type: array
                           items:
-                            $ref: "#/components/schemas/IssueSimple"
+                            type: object
+                            properties:
+                              key:
+                                type: string
+                              summary:
+                                type: string
 
   /api/jira/deadlines:
     get:
       operationId: getJiraDeadlines
       summary: Issues com deadline vencido ou proximo
-      description: Retorna issues atrasadas e issues vencendo nos proximos 7 dias.
       responses:
         "200":
           description: Alertas de deadline
@@ -148,24 +81,41 @@ paths:
                   overdue:
                     type: array
                     items:
-                      $ref: "#/components/schemas/IssueSimple"
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                        summary:
+                          type: string
+                        status:
+                          type: string
+                        duedate:
+                          type: string
                   upcoming_7d:
                     type: array
                     items:
-                      $ref: "#/components/schemas/IssueSimple"
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                        summary:
+                          type: string
+                        status:
+                          type: string
+                        duedate:
+                          type: string
 
   /api/jira/search:
     get:
       operationId: searchJiraIssues
       summary: Busca JQL generica
-      description: Executa uma query JQL e retorna as issues encontradas.
       parameters:
         - name: jql
           in: query
           required: true
           schema:
             type: string
-          description: Query JQL do Jira (ex. 'project=KAN AND status="Em andamento"')
+          description: Query JQL do Jira
       responses:
         "200":
           description: Resultado da busca
@@ -193,14 +143,12 @@ paths:
                           type: string
                         duedate:
                           type: string
-                          nullable: true
                         labels:
                           type: array
                           items:
                             type: string
                         assignee:
                           type: string
-                          nullable: true
 
   /api/jira/issue/{key}:
     get:
@@ -212,20 +160,53 @@ paths:
           required: true
           schema:
             type: string
-          description: Chave da issue (ex. KAN-42)
       responses:
         "200":
           description: Detalhes completos da issue
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/IssueDetail"
+                type: object
+                properties:
+                  key:
+                    type: string
+                  summary:
+                    type: string
+                  status:
+                    type: string
+                  issuetype:
+                    type: string
+                  priority:
+                    type: string
+                  duedate:
+                    type: string
+                  labels:
+                    type: array
+                    items:
+                      type: string
+                  assignee:
+                    type: string
+                  description_text:
+                    type: string
+                  components:
+                    type: array
+                    items:
+                      type: string
+                  created:
+                    type: string
+                  updated:
+                    type: string
+                  link:
+                    type: string
         "404":
           description: Issue nao encontrada
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                type: object
+                properties:
+                  error:
+                    type: string
 
     put:
       operationId: updateJiraIssue
@@ -245,8 +226,9 @@ paths:
               properties:
                 summary:
                   type: string
-                description:
+                issue_description:
                   type: string
+                  description: Texto da descricao da issue
                 priority:
                   type: string
                 labels:
@@ -287,12 +269,12 @@ paths:
               properties:
                 summary:
                   type: string
-                description:
+                issue_description:
                   type: string
+                  description: Texto da descricao da issue
                 issuetype:
                   type: string
-                  default: Task
-                  description: "Task, Subtask, Epic, Bug, etc."
+                  description: Task, Subtask, Epic, Bug, etc.
                 priority:
                   type: string
                 labels:
@@ -307,7 +289,7 @@ paths:
                   description: Jira accountId
                 parent:
                   type: string
-                  description: Chave da issue pai (ex. KAN-15)
+                  description: Chave da issue pai (ex KAN-15)
       responses:
         "201":
           description: Issue criada
@@ -325,9 +307,7 @@ paths:
     post:
       operationId: transitionJiraIssue
       summary: Mover status de uma issue
-      description: |
-        Sem body: lista transitions disponiveis.
-        Com body (transition_id): executa a transicao.
+      description: Sem body lista transitions disponiveis. Com body executa a transicao.
       parameters:
         - name: key
           in: path
@@ -343,7 +323,7 @@ paths:
               properties:
                 transition_id:
                   type: string
-                  description: ID da transicao (obter da lista de transitions disponiveis)
+                  description: ID da transicao
       responses:
         "200":
           description: Transicao executada ou lista de transitions
@@ -354,12 +334,10 @@ paths:
                 properties:
                   status:
                     type: string
-                    description: "transitioned" quando executada
                   key:
                     type: string
                   available_transitions:
                     type: array
-                    description: Lista de transitions disponiveis (quando sem body)
                     items:
                       type: object
                       properties:
@@ -388,7 +366,7 @@ paths:
                   description: Opcional. Default usa TELEGRAM_CHAT_ID configurado.
                 parse_mode:
                   type: string
-                  default: HTML
+                  description: HTML ou vazio
                 reply_to_message_id:
                   type: integer
       responses:
@@ -406,13 +384,6 @@ paths:
                     properties:
                       message_id:
                         type: integer
-                      chat:
-                        type: object
-                        properties:
-                          id:
-                            type: integer
-                      text:
-                        type: string
 
   /api/telegram/send-photo:
     post:
@@ -496,8 +467,6 @@ paths:
                   type: array
                   items:
                     type: string
-                  minItems: 2
-                  maxItems: 10
                 chat_id:
                   type: string
       responses:
@@ -514,15 +483,14 @@ paths:
   /api/telegram/updates:
     get:
       operationId: getTelegramUpdates
-      summary: Buscar mensagens recentes (filtrado por owner)
-      description: Retorna apenas mensagens do OWNER_TELEGRAM_ID.
+      summary: Buscar mensagens recentes filtrado por owner
       parameters:
         - name: offset
           in: query
           required: false
           schema:
             type: integer
-          description: Offset para paginacao de updates
+          description: Offset para paginacao
       responses:
         "200":
           description: Updates filtrados
@@ -545,18 +513,6 @@ paths:
                           properties:
                             message_id:
                               type: integer
-                            from:
-                              type: object
-                              properties:
-                                id:
-                                  type: integer
-                                username:
-                                  type: string
-                            chat:
-                              type: object
-                              properties:
-                                id:
-                                  type: integer
                             text:
                               type: string
                             date:
