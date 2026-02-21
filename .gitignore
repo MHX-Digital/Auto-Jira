@@ -1,0 +1,24 @@
+# Environment / Secrets
+.env
+CHATGPT_AUTH.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project internals
+_archive/
+.claude/
+*.log
