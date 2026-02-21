@@ -1,0 +1,501 @@
+openapi: 3.1.0
+info:
+  title: Auto-Jira API Middleware
+  description: |
+    API middleware para o Auto-Jira. Centraliza acesso ao Jira e Telegram
+    sem expor tokens diretamente. Usado como backend para ChatGPT Actions.
+  version: 2.0.0
+servers:
+  - url: https://YOUR-APP.up.railway.app
+    description: Railway production
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: APP_SECRET_KEY configurado no Railway
+
+  schemas:
+    IssueSimple:
+      type: object
+      properties:
+        key:
+          type: string
+          example: KAN-42
+        summary:
+          type: string
+        status:
+          type: string
+        duedate:
+          type: string
+          nullable: true
+
+    IssueDetail:
+      type: object
+      properties:
+        key:
+          type: string
+        summary:
+          type: string
+        status:
+          type: string
+        issuetype:
+          type: string
+        priority:
+          type: string
+        duedate:
+          type: string
+          nullable: true
+        labels:
+          type: array
+          items:
+            type: string
+        assignee:
+          type: string
+          nullable: true
+        description:
+          type: string
+        components:
+          type: array
+          items:
+            type: string
+        created:
+          type: string
+        updated:
+          type: string
+        link:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+paths:
+  /api/health:
+    get:
+      operationId: getHealth
+      summary: Status do servico
+      description: Retorna status, uptime e projeto configurado.
+      responses:
+        "200":
+          description: Servico operacional
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  service:
+                    type: string
+                  uptime:
+                    type: string
+                  project:
+                    type: string
+
+  /api/jira/status:
+    get:
+      operationId: getJiraStatus
+      summary: Resumo rapido do Jira KAN
+      description: Retorna contagens de issues por status e lista das ativas.
+      responses:
+        "200":
+          description: Resumo do projeto
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project:
+                    type: string
+                  total:
+                    type: integer
+                  done:
+                    type: integer
+                  active:
+                    type: integer
+                  by_status:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        count:
+                          type: integer
+                        issues:
+                          type: array
+                          items:
+                            $ref: "#/components/schemas/IssueSimple"
+
+  /api/jira/deadlines:
+    get:
+      operationId: getJiraDeadlines
+      summary: Issues com deadline vencido ou proximo
+      description: Retorna issues atrasadas e issues vencendo nos proximos 7 dias.
+      responses:
+        "200":
+          description: Alertas de deadline
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  overdue:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IssueSimple"
+                  upcoming_7d:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IssueSimple"
+
+  /api/jira/search:
+    get:
+      operationId: searchJiraIssues
+      summary: Busca JQL generica
+      description: Executa uma query JQL e retorna as issues encontradas.
+      parameters:
+        - name: jql
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Query JQL do Jira (ex. 'project=KAN AND status="Em andamento"')
+      responses:
+        "200":
+          description: Resultado da busca
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  issues:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                        summary:
+                          type: string
+                        status:
+                          type: string
+                        issuetype:
+                          type: string
+                        priority:
+                          type: string
+                        duedate:
+                          type: string
+                          nullable: true
+                        labels:
+                          type: array
+                          items:
+                            type: string
+                        assignee:
+                          type: string
+                          nullable: true
+
+  /api/jira/issue/{key}:
+    get:
+      operationId: getJiraIssue
+      summary: Detalhes de uma issue
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Chave da issue (ex. KAN-42)
+      responses:
+        "200":
+          description: Detalhes completos da issue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueDetail"
+        "404":
+          description: Issue nao encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    put:
+      operationId: updateJiraIssue
+      summary: Atualizar issue
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                summary:
+                  type: string
+                description:
+                  type: string
+                priority:
+                  type: string
+                labels:
+                  type: array
+                  items:
+                    type: string
+                duedate:
+                  type: string
+                  description: Formato YYYY-MM-DD
+                assignee:
+                  type: string
+                  description: Jira accountId
+      responses:
+        "200":
+          description: Issue atualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  key:
+                    type: string
+
+  /api/jira/issue:
+    post:
+      operationId: createJiraIssue
+      summary: Criar issue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - summary
+              properties:
+                summary:
+                  type: string
+                description:
+                  type: string
+                issuetype:
+                  type: string
+                  default: Task
+                  description: "Task, Subtask, Epic, Bug, etc."
+                priority:
+                  type: string
+                labels:
+                  type: array
+                  items:
+                    type: string
+                duedate:
+                  type: string
+                  description: Formato YYYY-MM-DD
+                assignee:
+                  type: string
+                  description: Jira accountId
+                parent:
+                  type: string
+                  description: Chave da issue pai (ex. KAN-15)
+      responses:
+        "201":
+          description: Issue criada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                  link:
+                    type: string
+
+  /api/jira/issue/{key}/transition:
+    post:
+      operationId: transitionJiraIssue
+      summary: Mover status de uma issue
+      description: |
+        Sem body: lista transitions disponiveis.
+        Com body (transition_id): executa a transicao.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                transition_id:
+                  type: string
+                  description: ID da transicao (obter da lista de transitions disponiveis)
+      responses:
+        "200":
+          description: Transicao executada ou lista de transitions
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/telegram/send:
+    post:
+      operationId: sendTelegramMessage
+      summary: Enviar mensagem no Telegram
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - text
+              properties:
+                text:
+                  type: string
+                chat_id:
+                  type: string
+                  description: Opcional. Default usa TELEGRAM_CHAT_ID configurado.
+                parse_mode:
+                  type: string
+                  default: HTML
+                reply_to_message_id:
+                  type: integer
+      responses:
+        "200":
+          description: Mensagem enviada
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/telegram/send-photo:
+    post:
+      operationId: sendTelegramPhoto
+      summary: Enviar foto no Telegram
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - photo
+              properties:
+                photo:
+                  type: string
+                  description: URL da foto
+                chat_id:
+                  type: string
+                caption:
+                  type: string
+      responses:
+        "200":
+          description: Foto enviada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  /api/telegram/send-document:
+    post:
+      operationId: sendTelegramDocument
+      summary: Enviar documento no Telegram
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - document
+              properties:
+                document:
+                  type: string
+                  description: URL do documento
+                chat_id:
+                  type: string
+                caption:
+                  type: string
+      responses:
+        "200":
+          description: Documento enviado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  /api/telegram/send-poll:
+    post:
+      operationId: sendTelegramPoll
+      summary: Criar enquete no Telegram
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - question
+                - options
+              properties:
+                question:
+                  type: string
+                options:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 2
+                  maxItems: 10
+                chat_id:
+                  type: string
+      responses:
+        "200":
+          description: Enquete criada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  /api/telegram/updates:
+    get:
+      operationId: getTelegramUpdates
+      summary: Buscar mensagens recentes (filtrado por owner)
+      description: Retorna apenas mensagens do OWNER_TELEGRAM_ID.
+      parameters:
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Offset para paginacao de updates
+      responses:
+        "200":
+          description: Updates filtrados
+          content:
+            application/json:
+              schema:
+                type: object
