@@ -92,6 +92,9 @@ def _esc(text):
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+SEPARATOR = "————————————————————————"
+
+
 # ======================================================================
 # MESSAGE TEMPLATES
 # ======================================================================
@@ -111,17 +114,17 @@ def handle_issue_created(data):
         meta_parts.append(issue_type)
     if priority:
         meta_parts.append(priority)
-    meta_line = "  \u2022  ".join(meta_parts)
+    meta_line = " | ".join(meta_parts)
 
     return (
-        f"\U0001f195 <b>Nova Issue Criada</b>\n"
+        f"<b>[JIRA] Nova Issue Criada</b>\n"
         f"\n"
-        f"\U0001f4cb <b>{_esc(key)}</b> \u2014 {summary}\n"
-        f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
-        f"\U0001f4dd {meta_line}\n"
-        f"\U0001f464 Criada por {creator}\n"
-        f"\U0001f517 <a href=\"{link}\">Abrir no Jira</a>\n"
-        f"\u23f0 {_now_brt()}"
+        f"<b>{_esc(key)}</b> — {summary}\n"
+        f"{SEPARATOR}\n"
+        f"Tipo: {meta_line}\n"
+        f"Criada por: {creator}\n"
+        f"<a href=\"{link}\">Abrir no Jira</a>\n"
+        f"{_now_brt()}"
     )
 
 
@@ -143,37 +146,38 @@ def handle_issue_updated(data):
 
         if field == "status":
             messages.append(
-                f"\U0001f504 <b>Status Alterado</b>\n"
+                f"<b>[JIRA] Status Alterado</b>\n"
                 f"\n"
-                f"\U0001f4cb <b>{_esc(key)}</b> \u2014 {summary}\n"
-                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
-                f"\U0001f4ca <code>{from_val}</code> \u2192 <code>{to_val}</code>\n"
-                f"\U0001f464 {user}\n"
-                f"\U0001f517 <a href=\"{link}\">Abrir no Jira</a>\n"
-                f"\u23f0 {_now_brt()}"
+                f"<b>{_esc(key)}</b> — {summary}\n"
+                f"{SEPARATOR}\n"
+                f"<code>{from_val}</code>  >>  <code>{to_val}</code>\n"
+                f"Por: {user}\n"
+                f"<a href=\"{link}\">Abrir no Jira</a>\n"
+                f"{_now_brt()}"
             )
 
         elif field == "assignee":
             messages.append(
-                f"\U0001f465 <b>Responsavel Alterado</b>\n"
+                f"<b>[JIRA] Responsavel Alterado</b>\n"
                 f"\n"
-                f"\U0001f4cb <b>{_esc(key)}</b> \u2014 {summary}\n"
-                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
-                f"\U0001f464 <code>{from_val or 'Ninguem'}</code> \u2192 <code>{to_val or 'Ninguem'}</code>\n"
-                f"\U0001f517 <a href=\"{link}\">Abrir no Jira</a>\n"
-                f"\u23f0 {_now_brt()}"
+                f"<b>{_esc(key)}</b> — {summary}\n"
+                f"{SEPARATOR}\n"
+                f"<code>{from_val or 'Ninguem'}</code>  >>  <code>{to_val or 'Ninguem'}</code>\n"
+                f"Por: {user}\n"
+                f"<a href=\"{link}\">Abrir no Jira</a>\n"
+                f"{_now_brt()}"
             )
 
         elif field == "priority":
             messages.append(
-                f"\u26a1 <b>Prioridade Alterada</b>\n"
+                f"<b>[JIRA] Prioridade Alterada</b>\n"
                 f"\n"
-                f"\U0001f4cb <b>{_esc(key)}</b> \u2014 {summary}\n"
-                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
-                f"\U0001f4ca <code>{from_val}</code> \u2192 <code>{to_val}</code>\n"
-                f"\U0001f464 {user}\n"
-                f"\U0001f517 <a href=\"{link}\">Abrir no Jira</a>\n"
-                f"\u23f0 {_now_brt()}"
+                f"<b>{_esc(key)}</b> — {summary}\n"
+                f"{SEPARATOR}\n"
+                f"<code>{from_val}</code>  >>  <code>{to_val}</code>\n"
+                f"Por: {user}\n"
+                f"<a href=\"{link}\">Abrir no Jira</a>\n"
+                f"{_now_brt()}"
             )
 
     if not messages:
@@ -197,14 +201,14 @@ def handle_comment_created(data):
         body_text = body_text[:500] + "..."
 
     return (
-        f"\U0001f4ac <b>Novo Comentario</b>\n"
+        f"<b>[JIRA] Novo Comentario</b>\n"
         f"\n"
-        f"\U0001f4cb <b>{_esc(key)}</b> \u2014 {summary}\n"
-        f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
-        f"\U0001f464 {author}\n"
-        f"\U0001f4dd {body_text}\n"
-        f"\U0001f517 <a href=\"{link}\">Abrir no Jira</a>\n"
-        f"\u23f0 {_now_brt()}"
+        f"<b>{_esc(key)}</b> — {summary}\n"
+        f"{SEPARATOR}\n"
+        f"Autor: {author}\n"
+        f"\"{body_text}\"\n"
+        f"<a href=\"{link}\">Abrir no Jira</a>\n"
+        f"{_now_brt()}"
     )
 
 
@@ -216,12 +220,12 @@ def handle_issue_deleted(data):
     user = _esc((data.get("user") or {}).get("displayName", "?"))
 
     return (
-        f"\U0001f5d1 <b>Issue Deletada</b>\n"
+        f"<b>[JIRA] Issue Deletada</b>\n"
         f"\n"
-        f"\U0001f4cb <b>{_esc(key)}</b> \u2014 {summary}\n"
-        f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
-        f"\U0001f464 Deletada por {user}\n"
-        f"\u23f0 {_now_brt()}"
+        f"<b>{_esc(key)}</b> — {summary}\n"
+        f"{SEPARATOR}\n"
+        f"Deletada por: {user}\n"
+        f"{_now_brt()}"
     )
 
 

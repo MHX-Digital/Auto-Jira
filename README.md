@@ -8,38 +8,38 @@ Recebe eventos em tempo real e envia mensagens formatadas para seu grupo/chat no
 ## Como Funciona
 
 ```
-Jira Cloud ──webhook──> Railway (Flask/Gunicorn) ──API──> Telegram Bot
-                              │
+Jira Cloud --webhook--> Railway (Flask/Gunicorn) --API--> Telegram Bot
+                              |
                         POST /webhook/jira
-                              │
+                              |
                      Identifica evento
                      Formata mensagem
-                              │
+                              |
                      Envia para o chat
 ```
 
 ### Eventos Monitorados
 
-| Evento | Descricao | Emoji |
-|--------|-----------|-------|
-| Issue criada | Nova tarefa, story, epic, etc | 🆕 |
-| Status alterado | Mudanca de coluna no board | 🔄 |
-| Responsavel alterado | Troca de assignee | 👥 |
-| Prioridade alterada | Mudanca de prioridade | ⚡ |
-| Comentario criado | Novo comentario em issue | 💬 |
-| Issue deletada | Remocao de issue | 🗑️ |
+| Evento | Descricao |
+|--------|-----------|
+| Issue criada | Nova tarefa, story, epic, etc |
+| Status alterado | Mudanca de coluna no board |
+| Responsavel alterado | Troca de assignee |
+| Prioridade alterada | Mudanca de prioridade |
+| Comentario criado | Novo comentario em issue |
+| Issue deletada | Remocao de issue |
 
 ### Exemplo de Notificacao
 
 ```
-🔄 Status Alterado
+[JIRA] Status Alterado
 
-📋 KAN-170 — 2FA (TOTP)
-━━━━━━━━━━━━━━━━━━━━━━━━
-📊 A fazer → Em andamento
-👤 Maike Henrique
-🔗 Abrir no Jira
-⏰ 21/02/2026 15:30
+KAN-170 — 2FA (TOTP)
+————————————————————————
+A fazer  >>  Em andamento
+Por: Maike Henrique
+Abrir no Jira
+21/02/2026 15:30
 ```
 
 ---
@@ -204,24 +204,24 @@ docker run -p 8080:8080 --env-file .env auto-jira
 
 ```
 Auto-Jira/
-├── app.py              # Servico Flask (webhook receiver)
-├── Dockerfile          # Build para Railway
-├── requirements.txt    # Dependencias Python
-├── railway.toml        # Config Railway
-├── .env.example        # Template de variaveis
-├── .gitignore          # Protecao de dados sensiveis
-├── README.md           # Este arquivo
-└── scripts/            # Scripts utilitarios (uso local)
-    ├── jira_register_webhook.py
-    ├── jira_telegram_notify.py
-    ├── jira_move_status.py
-    ├── jira_set_duedates.py
-    ├── jira_set_in_progress.py
-    ├── jira_nexusp2p_update.py
-    ├── jira_kan13_v2_update.py
-    ├── jira_kan13_90day_plan.py
-    ├── jira_daily_telegram.py
-    └── jira_move_subtasks_to_in_progress.py
+|-- app.py              # Servico Flask (webhook receiver)
+|-- Dockerfile          # Build para Railway
+|-- requirements.txt    # Dependencias Python
+|-- railway.toml        # Config Railway
+|-- .env.example        # Template de variaveis
+|-- .gitignore          # Protecao de dados sensiveis
+|-- README.md           # Este arquivo
++-- scripts/            # Scripts utilitarios (uso local)
+    |-- jira_register_webhook.py
+    |-- jira_telegram_notify.py
+    |-- jira_move_status.py
+    |-- jira_set_duedates.py
+    |-- jira_set_in_progress.py
+    |-- jira_nexusp2p_update.py
+    |-- jira_kan13_v2_update.py
+    |-- jira_kan13_90day_plan.py
+    |-- jira_daily_telegram.py
+    +-- jira_move_subtasks_to_in_progress.py
 ```
 
 ---
