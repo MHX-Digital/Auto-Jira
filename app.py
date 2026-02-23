@@ -1614,11 +1614,100 @@ def api_telegram_updates():
 
 
 # ======================================================================
-# SCHEDULER — APScheduler
+# ROUTES — Cron Trigger (external cron service)
+# ======================================================================
+
+CRON_SECRET = os.environ.get("CRON_SECRET", "") or APP_SECRET_KEY
+
+
+def _check_cron_auth():
+    """Verifica auth para rotas /cron/*. Aceita Bearer token ou ?secret= query param."""
+    if not CRON_SECRET:
+        return jsonify({"error": "CRON_SECRET not configured"}), 500
+
+    # Check Bearer token first
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and hmac.compare_digest(auth[7:], CRON_SECRET):
+        return None
+
+    # Fallback to query param (useful for cron-job.org)
+    secret = request.args.get("secret", "")
+    if secret and hmac.compare_digest(secret, CRON_SECRET):
+        return None
+
+    return jsonify({"error": "unauthorized"}), 401
+
+
+@app.route("/cron/daily-digest", methods=["GET", "POST"])
+def cron_daily_digest():
+    """Endpoint para trigger externo do daily digest (cron-job.org, Railway cron, etc.)."""
+    auth_err = _check_cron_auth()
+    if auth_err:
+        return auth_err
+
+    log.info("[CRON] Daily digest triggered via HTTP")
+    try:
+        send_daily_digest()
+        return jsonify({"status": "ok", "message": "daily digest sent", "timestamp": _now_brt()})
+    except Exception as e:
+        log.error("[CRON] Daily digest failed: %s", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/cron/test", methods=["GET", "POST"])
+def cron_test():
+    """Dry-run: retorna o digest sem enviar no Telegram."""
+    auth_err = _check_cron_auth()
+    if auth_err:
+        return auth_err
+
+    log.info("[CRON] Test digest requested")
+    try:
+        jql = f'project={JIRA_PROJECT_KEY} AND status != "Concluido" ORDER BY key ASC'
+        raw = jira_search(jql)
+        if not raw:
+            return jsonify({"status": "ok", "message": "no issues found", "msg1": "", "msg2": ""})
+
+        tasks, subtasks = _parse_issues(raw)
+        msg1, msg2 = _build_digest_messages(tasks, subtasks)
+
+        return jsonify({
+            "status": "ok",
+            "message": "dry run - not sent to Telegram",
+            "total_issues": len(raw),
+            "total_tasks": len(tasks),
+            "total_subtasks": len(subtasks),
+            "msg1_preview": msg1[:500],
+            "msg2_preview": msg2[:500],
+            "timestamp": _now_brt(),
+        })
+    except Exception as e:
+        log.error("[CRON] Test digest failed: %s", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ======================================================================
+# SCHEDULER — APScheduler (fallback, runs if container stays alive)
 # ======================================================================
 
 scheduler = BackgroundScheduler(timezone=BRT_TZ)
 scheduler.add_job(send_daily_digest, "cron", hour="8,19", minute=0, id="daily_digest")
+
+
+def _start_scheduler():
+    """Inicia APScheduler com logging claro."""
+    try:
+        scheduler.start()
+        jobs = scheduler.get_jobs()
+        log.info("=" * 50)
+        log.info("APScheduler iniciado com %d job(s):", len(jobs))
+        for job in jobs:
+            log.info("  - %s | trigger: %s | next: %s", job.id, job.trigger, job.next_run_time)
+        log.info("NOTA: Use cron externo (cron-job.org) como trigger principal.")
+        log.info("  URL: /cron/daily-digest?secret=<CRON_SECRET>")
+        log.info("=" * 50)
+    except Exception as e:
+        log.error("APScheduler falhou ao iniciar: %s", e)
 
 
 # ======================================================================
@@ -1626,10 +1715,10 @@ scheduler.add_job(send_daily_digest, "cron", hour="8,19", minute=0, id="daily_di
 # ======================================================================
 
 if __name__ == "__main__":
-    scheduler.start()
+    _start_scheduler()
     port = int(os.environ.get("PORT", 5000))
     log.info("Servidor dev na porta %d", port)
     app.run(host="0.0.0.0", port=port, debug=True, use_reloader=False)
 else:
     # Production (gunicorn)
-    scheduler.start()
+    _start_scheduler()
