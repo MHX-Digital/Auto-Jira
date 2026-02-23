@@ -307,10 +307,52 @@ docker run -p 8080:8080 --env-file .env auto-jira
 
 ### Endpoints
 
+> **Nota:** Todas as rotas `/api/*` requerem autenticacao via header `Authorization: Bearer <APP_SECRET_KEY>`.
+> As rotas `/cron/*` aceitam Bearer token ou query param `?secret=<CRON_SECRET>`.
+
+**Health**
+
 | Metodo | Rota | Descricao |
 |--------|------|-----------|
-| GET | `/` | Health check (status + uptime) |
-| POST | `/webhook/jira` | Recebe webhooks do Jira |
+| GET | `/` | Health check (status + uptime + projeto) |
+
+**Webhooks**
+
+| Metodo | Rota | Descricao |
+|--------|------|-----------|
+| POST | `/webhook/jira` | Recebe webhooks do Jira Cloud e notifica Telegram |
+| POST | `/webhook/telegram` | Recebe updates do Telegram Bot (comandos + chat AI) |
+
+**Dashboard**
+
+| Metodo | Rota | Descricao |
+|--------|------|-----------|
+| GET | `/dashboard` | Painel HTML com cards, issues em andamento e alertas de deadline |
+
+**API Middleware (auth required)**
+
+| Metodo | Rota | Descricao |
+|--------|------|-----------|
+| GET | `/api/health` | Health check autenticado |
+| GET | `/api/jira/status` | Resumo do projeto (contagens por status + lista de issues) |
+| GET | `/api/jira/deadlines` | Issues atrasadas e vencendo nos proximos 7 dias |
+| GET | `/api/jira/search` | Busca issues via JQL (query param `?jql=`) |
+| GET | `/api/jira/issue/<key>` | Detalhes de uma issue especifica |
+| POST | `/api/jira/issue` | Cria nova issue no Jira |
+| PUT | `/api/jira/issue/<key>` | Atualiza campos de uma issue existente |
+| POST | `/api/jira/issue/<key>/transition` | Move issue para outro status (ou lista transitions disponiveis) |
+| POST | `/api/telegram/send` | Envia mensagem de texto via Telegram |
+| POST | `/api/telegram/send-photo` | Envia foto via Telegram |
+| POST | `/api/telegram/send-document` | Envia documento via Telegram |
+| POST | `/api/telegram/send-poll` | Cria enquete via Telegram |
+| GET | `/api/telegram/updates` | Lista updates recentes do Telegram (filtrado por owner) |
+
+**Cron (auth required)**
+
+| Metodo | Rota | Descricao |
+|--------|------|-----------|
+| GET/POST | `/cron/daily-digest` | Trigger externo do resumo diario (envia no Telegram) |
+| GET/POST | `/cron/test` | Dry-run do digest (retorna preview sem enviar) |
 
 ---
 
