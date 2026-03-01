@@ -1690,8 +1690,33 @@ def cron_test():
 # SCHEDULER — APScheduler (fallback, runs if container stays alive)
 # ======================================================================
 
+def check_recurring_payments():
+    """Verifica pagamentos recorrentes e envia lembrete 2 dias antes (dia 18)."""
+    today = datetime.now(BRT_TZ)
+    if today.day != 18:
+        return
+    log.info("Dia 18 — enviando lembrete de parcelas dia 20")
+    next_month = today.strftime("%B/%Y")
+    msg = (
+        f"\u26a0\ufe0f LEMBRETE PARCELAS — Vencimento dia 20\n"
+        f"{SEPARATOR}\n"
+        f"\n"
+        f"\U0001f4b3 KAN-213 — Divida ativa 1: R$620,68\n"
+        f"   Parcela mensal (18x) — pagar ate 20/{today.strftime('%m/%Y')}\n"
+        f"\n"
+        f"\U0001f4b3 KAN-214 — Divida ativa 2: R$588,60\n"
+        f"   Parcela mensal (60x) — pagar ate 20/{today.strftime('%m/%Y')}\n"
+        f"\n"
+        f"\U0001f4c5 Faltam 2 dias!\n"
+        f"\n"
+        f"PJ 24.409 — modo manutencao"
+    )
+    tg_send_plain(msg)
+
+
 scheduler = BackgroundScheduler(timezone=BRT_TZ)
 scheduler.add_job(send_daily_digest, "cron", hour="8,19", minute=0, id="daily_digest")
+scheduler.add_job(check_recurring_payments, "cron", hour=9, minute=0, day="18", id="payment_reminder")
 
 
 def _start_scheduler():
