@@ -45,6 +45,23 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 APP_SECRET_KEY = os.environ.get("APP_SECRET_KEY", "")
 
+# Telegram Forum Topics (message_thread_id para cada topico)
+# Rodar scripts/setup_telegram_topics.py para criar e obter os IDs
+TOPIC_JIRA = os.environ.get("TOPIC_JIRA", "")
+TOPIC_MEV = os.environ.get("TOPIC_MEV", "")
+TOPIC_SHIELDFINANCE = os.environ.get("TOPIC_SHIELDFINANCE", "")
+TOPIC_CHAT = os.environ.get("TOPIC_CHAT", "")
+TOPIC_NEWS = os.environ.get("TOPIC_NEWS", "")
+TOPIC_WHALE = os.environ.get("TOPIC_WHALE", "")
+TOPIC_CRYPTO = os.environ.get("TOPIC_CRYPTO", "")
+TOPIC_PANIC = os.environ.get("TOPIC_PANIC", "")
+TOPIC_CLIENTS = os.environ.get("TOPIC_CLIENTS", "")
+TOPIC_DOCS = os.environ.get("TOPIC_DOCS", "")
+
+def _topic_id(env_val):
+    """Converte env var string para int ou None."""
+    return int(env_val) if env_val else None
+
 START_TIME = time.time()
 BRT = timezone(timedelta(hours=-3))
 BRT_TZ = pytz.timezone("America/Sao_Paulo")
@@ -134,8 +151,10 @@ def _get_message_text(update):
 # TELEGRAM — Send
 # ======================================================================
 
-def tg_send(text, chat_id=None):
-    """Envia mensagem HTML via Telegram Bot API. Divide se > 4096 chars."""
+def tg_send(text, chat_id=None, topic_id=None):
+    """Envia mensagem HTML via Telegram Bot API. Divide se > 4096 chars.
+    topic_id: message_thread_id para Forum Topics (opcional).
+    """
     target = chat_id or TELEGRAM_CHAT_ID
     if not TELEGRAM_BOT_TOKEN or not target:
         log.error("TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID nao configurados")
@@ -144,13 +163,16 @@ def tg_send(text, chat_id=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
     for chunk in chunks:
+        payload = {
+            "chat_id": target,
+            "text": chunk,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        if topic_id:
+            payload["message_thread_id"] = topic_id
         try:
-            r = requests.post(url, json={
-                "chat_id": target,
-                "text": chunk,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            }, timeout=15)
+            r = requests.post(url, json=payload, timeout=15)
             if r.status_code != 200:
                 log.error("Telegram erro: %s - %s", r.status_code, r.text[:300])
                 return False
@@ -160,8 +182,10 @@ def tg_send(text, chat_id=None):
     return True
 
 
-def tg_send_plain(text, chat_id=None):
-    """Envia mensagem plain text (sem parse_mode)."""
+def tg_send_plain(text, chat_id=None, topic_id=None):
+    """Envia mensagem plain text (sem parse_mode).
+    topic_id: message_thread_id para Forum Topics (opcional).
+    """
     target = chat_id or TELEGRAM_CHAT_ID
     if not TELEGRAM_BOT_TOKEN or not target:
         return False
@@ -169,12 +193,15 @@ def tg_send_plain(text, chat_id=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
     for chunk in chunks:
+        payload = {
+            "chat_id": target,
+            "text": chunk,
+            "disable_web_page_preview": True,
+        }
+        if topic_id:
+            payload["message_thread_id"] = topic_id
         try:
-            r = requests.post(url, json={
-                "chat_id": target,
-                "text": chunk,
-                "disable_web_page_preview": True,
-            }, timeout=15)
+            r = requests.post(url, json=payload, timeout=15)
             if r.status_code != 200:
                 log.error("Telegram erro: %s - %s", r.status_code, r.text[:300])
                 return False
@@ -805,142 +832,226 @@ def _parse_issues(raw_issues):
     return tasks, subtasks
 
 
-def _build_digest_messages(tasks, subtasks):
-    """Monta as 2 mensagens do resumo diario."""
+def _build_morning_digest(tasks, subtasks):
+    """Seg-Sex manha: tarefas Em Andamento (conciso)."""
     now = datetime.now(BRT)
-    hora = now.strftime("%H:%M")
     data = now.strftime("%d/%m/%Y")
-    periodo = "Bom dia" if now.hour < 12 else "Boa noite"
 
-    tasks_afazer = [t for t in tasks if t["status"] == "A fazer"]
-    tasks_andamento = [t for t in tasks if t["status"] == "Em andamento"]
-    subs_afazer = [s for s in subtasks if s["status"] == "A fazer"]
+    andamento = [t for t in tasks if t["status"] == "Em andamento"]
     subs_andamento = [s for s in subtasks if s["status"] == "Em andamento"]
+    today = now.date()
 
-    # MSG 1: A FAZER
-    msg1_lines = [
-        f"{periodo}! Resumo Jira {JIRA_PROJECT_KEY} - {data} ({hora})",
+    lines = [f"Bom dia! {data}", f"{len(andamento)} tarefas em andamento:", ""]
+
+    for t in andamento:
+        due_str = ""
+        if t["duedate"]:
+            due = datetime.strptime(t["duedate"], "%Y-%m-%d").date()
+            diff = (due - today).days
+            if diff < 0:
+                due_str = f" [ATRASADA {-diff}d]"
+            elif diff <= 7:
+                due_str = f" [vence {diff}d]"
+        lines.append(f"  {t['key']} {t['summary'][:50]}{due_str}")
+
+        child = [s for s in subs_andamento if s["parent"] == t["key"]]
+        for s in child:
+            lines.append(f"    > {s['key']} {s['summary'][:40]}")
+
+    return "\n".join(lines)
+
+
+def _build_night_digest(tasks, subtasks):
+    """Seg-Sex noite: tarefas concluidas hoje."""
+    now = datetime.now(BRT)
+    data = now.strftime("%d/%m/%Y")
+    today_str = now.strftime("%Y-%m-%d")
+
+    concluidos = [t for t in tasks if t["status"] == "Concluído" or t["status"] == "Concluido"]
+    subs_concluidos = [s for s in subtasks if s["status"] == "Concluído" or s["status"] == "Concluido"]
+    total = len(concluidos) + len(subs_concluidos)
+
+    if total == 0:
+        return f"Boa noite! {data}\n\nNenhuma tarefa concluida hoje."
+
+    lines = [f"Boa noite! {data}", f"{total} tarefa(s) concluida(s) hoje:", ""]
+
+    for t in concluidos:
+        lines.append(f"  {t['key']} {t['summary'][:50]}")
+    for s in subs_concluidos:
+        parent = f" ({s['parent']})" if s["parent"] else ""
+        lines.append(f"  {s['key']} {s['summary'][:45]}{parent}")
+
+    return "\n".join(lines)
+
+
+def _build_weekly_report(tasks, subtasks):
+    """Sabado manha: relatorio semanal (dom-sab)."""
+    now = datetime.now(BRT)
+    data = now.strftime("%d/%m/%Y")
+
+    concluidos = [t for t in tasks if t["status"] == "Concluído" or t["status"] == "Concluido"]
+    subs_concluidos = [s for s in subtasks if s["status"] == "Concluído" or s["status"] == "Concluido"]
+    andamento = [t for t in tasks if t["status"] == "Em andamento"]
+    afazer = [t for t in tasks if t["status"] == "A fazer"]
+    em_analise = [t for t in tasks if t["status"] == "Em análise" or t["status"] == "Em analise"]
+    total_concluidos = len(concluidos) + len(subs_concluidos)
+
+    lines = [
+        f"RELATORIO SEMANAL | {data}",
+        "=" * 30,
         "",
-        "--- A FAZER ---",
-        "",
-        f"Tasks (Epics/Tarefas): {len(tasks_afazer)}",
-        f"Subtasks: {len(subs_afazer)}",
-        f"Total pendente: {len(tasks_afazer) + len(subs_afazer)}",
+        f"Concluidas: {total_concluidos}",
+        f"Em andamento: {len(andamento)}",
+        f"Em analise: {len(em_analise)}",
+        f"A fazer: {len(afazer)}",
         "",
     ]
 
-    if tasks_afazer:
-        msg1_lines.append("Tasks pendentes:")
-        for t in tasks_afazer:
-            due = f" | ate {t['duedate']}" if t["duedate"] else ""
-            labels = f" [{', '.join(t['labels'])}]" if t["labels"] else ""
-            msg1_lines.append(f"  - {t['key']} {t['summary'][:50]}{labels}{due}")
-        msg1_lines.append("")
+    if concluidos:
+        lines.append("Concluidas na semana:")
+        for t in concluidos:
+            lines.append(f"  {t['key']} {t['summary'][:50]}")
+    if subs_concluidos:
+        for s in subs_concluidos:
+            lines.append(f"  {s['key']} {s['summary'][:45]}")
 
-    if subs_afazer:
-        msg1_lines.append(f"Subtasks pendentes ({len(subs_afazer)}):")
-        by_parent = {}
-        for s in subs_afazer:
-            p = s["parent"] or "sem parent"
-            by_parent.setdefault(p, []).append(s)
-        for parent, subs in sorted(by_parent.items()):
-            msg1_lines.append(f"  [{parent}]")
-            for s in subs:
-                msg1_lines.append(f"    - {s['key']} {s['summary'][:45]}")
-        msg1_lines.append("")
+    if concluidos or subs_concluidos:
+        lines.append("")
 
-    # MSG 2: EM ANDAMENTO
-    msg2_lines = [
-        "--- EM ANDAMENTO ---",
-        "",
-        f"Tasks ativas: {len(tasks_andamento)}",
-        f"Subtasks ativas: {len(subs_andamento)}",
-        "",
-    ]
-
-    if tasks_andamento:
-        msg2_lines.append("== TASKS ==")
-        msg2_lines.append("")
-        for t in tasks_andamento:
-            due = f"Deadline: {t['duedate']}" if t["duedate"] else "Sem deadline"
-            comp = f"Componente: {', '.join(t['components'])}" if t["components"] else ""
-            labels = f"Labels: {', '.join(t['labels'])}" if t["labels"] else ""
-
-            msg2_lines.append(f"{t['key']} - {t['summary']}")
-            info_parts = [x for x in [due, comp, labels] if x]
-            if info_parts:
-                msg2_lines.append(f"  {' | '.join(info_parts)}")
-
-            child_subs = [s for s in subs_andamento if s["parent"] == t["key"]]
-            if child_subs:
-                msg2_lines.append(f"  Subtasks em andamento ({len(child_subs)}):")
-                for s in child_subs:
-                    msg2_lines.append(f"    > {s['key']} {s['summary'][:45]}")
-            msg2_lines.append("")
-
-    andamento_keys = {t["key"] for t in tasks_andamento}
-    subs_orfas = [s for s in subs_andamento if s["parent"] not in andamento_keys]
-    if subs_orfas:
-        msg2_lines.append("== SUBTASKS (parent nao listado acima) ==")
-        msg2_lines.append("")
-        by_parent = {}
-        for s in subs_orfas:
-            p = s["parent"] or "sem parent"
-            by_parent.setdefault(p, []).append(s)
-        for parent, subs in sorted(by_parent.items()):
-            msg2_lines.append(f"  [{parent}]")
-            for s in subs:
-                msg2_lines.append(f"    > {s['key']} {s['summary'][:45]}")
-        msg2_lines.append("")
-
-    today = datetime.now(BRT).date()
+    # Alertas de deadline
+    today = now.date()
     alertas = []
-    for t in tasks_andamento + subs_andamento:
+    for t in andamento:
         if not t["duedate"]:
             continue
         due = datetime.strptime(t["duedate"], "%Y-%m-%d").date()
         diff = (due - today).days
         if diff < 0:
-            alertas.append(f"  [ATRASADA] {t['key']} {t['summary'][:35]} ({-diff}d atrasada)")
-        elif diff <= 7:
-            alertas.append(f"  [URGENTE] {t['key']} {t['summary'][:35]} (vence em {diff}d)")
+            alertas.append(f"  [ATRASADA {-diff}d] {t['key']} {t['summary'][:35]}")
+        elif diff <= 14:
+            alertas.append(f"  [vence {diff}d] {t['key']} {t['summary'][:35]}")
 
     if alertas:
-        msg2_lines.append("--- ALERTAS DEADLINE ---")
-        msg2_lines.append("")
-        for a in alertas:
-            msg2_lines.append(a)
-        msg2_lines.append("")
+        lines.append("Deadlines proximos:")
+        lines.extend(alertas)
 
-    msg2_lines.append("---")
-    msg2_lines.append(f"MHX Digital | Jira {JIRA_PROJECT_KEY} Notifier")
+    return "\n".join(lines)
 
-    return "\n".join(msg1_lines), "\n".join(msg2_lines)
+
+def _build_sunday_planning(tasks, subtasks):
+    """Domingo noite: planejamento da semana."""
+    now = datetime.now(BRT)
+    today = now.date()
+
+    andamento = [t for t in tasks if t["status"] == "Em andamento"]
+    em_analise = [t for t in tasks if t["status"] == "Em análise" or t["status"] == "Em analise"]
+
+    # Tasks com deadline na proxima semana (7 dias)
+    urgentes = []
+    atrasadas = []
+    for t in andamento + em_analise:
+        if not t["duedate"]:
+            continue
+        due = datetime.strptime(t["duedate"], "%Y-%m-%d").date()
+        diff = (due - today).days
+        if diff < 0:
+            atrasadas.append((t, -diff))
+        elif diff <= 7:
+            urgentes.append((t, diff))
+
+    lines = [
+        f"PLANEJAMENTO DA SEMANA",
+        "=" * 30,
+        "",
+        f"Em andamento: {len(andamento)} | Em analise: {len(em_analise)}",
+        "",
+    ]
+
+    if atrasadas:
+        lines.append(f"ATRASADAS ({len(atrasadas)}):")
+        for t, days in sorted(atrasadas, key=lambda x: -x[1]):
+            lines.append(f"  {t['key']} {t['summary'][:45]} [{days}d atrasada]")
+        lines.append("")
+
+    if urgentes:
+        lines.append(f"VENCE ESTA SEMANA ({len(urgentes)}):")
+        for t, days in sorted(urgentes, key=lambda x: x[1]):
+            lines.append(f"  {t['key']} {t['summary'][:45]} [{days}d]")
+        lines.append("")
+
+    if not atrasadas and not urgentes:
+        lines.append("Nenhum deadline critico esta semana.")
+        lines.append("")
+
+    # Top 5 em andamento (foco da semana)
+    if andamento:
+        lines.append(f"FOCO DA SEMANA ({min(len(andamento), 5)} prioridades):")
+        for t in andamento[:5]:
+            due = f" | ate {t['duedate']}" if t["duedate"] else ""
+            lines.append(f"  {t['key']} {t['summary'][:45]}{due}")
+
+    return "\n".join(lines)
 
 
 def send_daily_digest():
-    """Busca issues e envia resumo diario no Telegram."""
-    log.info("Enviando daily digest...")
+    """Envia digest contextual baseado no dia/horario.
+
+    Seg-Sex 08h: tarefas Em Andamento
+    Seg-Sex 19h: tarefas concluidas no dia
+    Sab 08h: relatorio semanal (dom-sab)
+    Sab 19h: nao envia
+    Dom 08h: nao envia
+    Dom 19h: planejamento da semana
+    """
+    now = datetime.now(BRT)
+    weekday = now.weekday()  # 0=seg, 5=sab, 6=dom
+    is_morning = now.hour < 12
+
+    # Sab noite e Dom manha: nao envia
+    if (weekday == 5 and not is_morning) or (weekday == 6 and is_morning):
+        log.info("Digest suprimido: %s %s", ["seg","ter","qua","qui","sex","sab","dom"][weekday],
+                 "manha" if is_morning else "noite")
+        return
+
+    log.info("Enviando digest: %s %s", ["seg","ter","qua","qui","sex","sab","dom"][weekday],
+             "manha" if is_morning else "noite")
+
     try:
-        jql = f'project={JIRA_PROJECT_KEY} AND status != "Concluido" ORDER BY key ASC'
+        # Busca todas as issues (incluindo concluidas para noite/semanal)
+        if is_morning and weekday < 5:
+            # Seg-Sex manha: so precisa das nao concluidas
+            jql = f'project={JIRA_PROJECT_KEY} AND status != "Concluido" ORDER BY key ASC'
+        else:
+            # Noite / Sab manha / Dom noite: precisa de tudo
+            jql = f'project={JIRA_PROJECT_KEY} ORDER BY key ASC'
+
         raw = jira_search(jql)
         if not raw:
-            log.warning("Daily digest: nenhuma issue encontrada")
+            log.warning("Digest: nenhuma issue encontrada")
             return
 
         tasks, subtasks = _parse_issues(raw)
-        msg1, msg2 = _build_digest_messages(tasks, subtasks)
 
-        ok1 = tg_send_plain(msg1)
-        time.sleep(0.5)
-        ok2 = tg_send_plain(msg2)
-
-        if ok1 and ok2:
-            log.info("Daily digest enviado com sucesso")
+        # Escolhe o builder correto
+        if weekday == 5 and is_morning:
+            msg = _build_weekly_report(tasks, subtasks)
+        elif weekday == 6 and not is_morning:
+            msg = _build_sunday_planning(tasks, subtasks)
+        elif is_morning:
+            msg = _build_morning_digest(tasks, subtasks)
         else:
-            log.error("Daily digest: falha no envio")
+            msg = _build_night_digest(tasks, subtasks)
+
+        jira_topic = _topic_id(TOPIC_JIRA)
+        ok = tg_send_plain(msg, topic_id=jira_topic)
+
+        if ok:
+            log.info("Digest enviado com sucesso")
+        else:
+            log.error("Digest: falha no envio")
     except Exception as e:
-        log.error("Daily digest erro: %s", e)
+        log.error("Digest erro: %s", e)
 
 
 # ======================================================================
@@ -1167,9 +1278,9 @@ def webhook_jira():
         log.info("Sem mudancas relevantes no changelog")
         return jsonify({"status": "ignored", "reason": "no relevant changes"}), 200
 
-    ok = tg_send(message)
+    ok = tg_send(message, topic_id=_topic_id(TOPIC_JIRA))
     if ok:
-        log.info("Notificacao enviada: %s [%s]", issue_key, event)
+        log.info("Notificacao enviada: %s [%s] -> topico Jira", issue_key, event)
         return jsonify({"status": "sent"}), 200
     else:
         log.error("Falha ao enviar notificacao para Telegram")
@@ -1531,6 +1642,19 @@ def api_telegram_send():
         payload["parse_mode"] = parse_mode
     if "reply_to_message_id" in data:
         payload["reply_to_message_id"] = data["reply_to_message_id"]
+    if "message_thread_id" in data:
+        payload["message_thread_id"] = data["message_thread_id"]
+    elif "topic" in data:
+        # Aceita nome do topico: jira, mev, shieldfinance, chat, news, whale, crypto, panic, clients, docs
+        topic_map = {
+            "jira": TOPIC_JIRA, "mev": TOPIC_MEV, "shieldfinance": TOPIC_SHIELDFINANCE,
+            "chat": TOPIC_CHAT, "news": TOPIC_NEWS,
+            "whale": TOPIC_WHALE, "crypto": TOPIC_CRYPTO, "panic": TOPIC_PANIC,
+            "clients": TOPIC_CLIENTS, "docs": TOPIC_DOCS,
+        }
+        tid = _topic_id(topic_map.get(data["topic"].lower(), ""))
+        if tid:
+            payload["message_thread_id"] = tid
 
     try:
         r = requests.post(url, json=payload, timeout=15)
@@ -1582,6 +1706,33 @@ def api_telegram_send_poll():
     chat_id = data.get("chat_id", TELEGRAM_CHAT_ID)
     ok = tg_send_poll(chat_id, data["question"], data["options"])
     return jsonify({"ok": ok})
+
+
+@app.route("/api/telegram/topics", methods=["GET"])
+def api_telegram_topics():
+    """Lista topicos configurados no grupo MHX."""
+    auth_err = require_api_key()
+    if auth_err:
+        return auth_err
+
+    topics = {
+        "jira": _topic_id(TOPIC_JIRA),
+        "mev": _topic_id(TOPIC_MEV),
+        "shieldfinance": _topic_id(TOPIC_SHIELDFINANCE),
+        "chat": _topic_id(TOPIC_CHAT),
+        "news": _topic_id(TOPIC_NEWS),
+        "whale": _topic_id(TOPIC_WHALE),
+        "crypto": _topic_id(TOPIC_CRYPTO),
+        "panic": _topic_id(TOPIC_PANIC),
+        "clients": _topic_id(TOPIC_CLIENTS),
+        "docs": _topic_id(TOPIC_DOCS),
+    }
+    configured = {k: v for k, v in topics.items() if v is not None}
+    return jsonify({
+        "topics": configured,
+        "total_configured": len(configured),
+        "total_available": len(topics),
+    })
 
 
 @app.route("/api/telegram/updates", methods=["GET"])
@@ -1711,12 +1862,33 @@ def check_recurring_payments():
         f"\n"
         f"PJ 24.409 — modo manutencao"
     )
-    tg_send_plain(msg)
+    tg_send_plain(msg, topic_id=_topic_id(TOPIC_JIRA))
+
+
+def check_protesto_reminder():
+    """Envia lembrete do protesto KAN-212 no dia 1 de maio."""
+    today = datetime.now(BRT_TZ)
+    if today.month != 5 or today.day != 1:
+        return
+    log.info("1 de maio — lembrete protesto KAN-212")
+    msg = (
+        "\u26a0\ufe0f LEMBRETE PROTESTO — KAN-212\n"
+        f"{SEPARATOR}\n"
+        "\n"
+        "\U0001f4cb Protesto cartorio: R$118,62\n"
+        "   PJ 24.409 — pagar ate 15/mai/2026\n"
+        "\n"
+        "\U0001f4c5 Faltam 14 dias para o vencimento!\n"
+        "\n"
+        "Acao: realizar pagamento e solicitar baixa do protesto."
+    )
+    tg_send_plain(msg, topic_id=_topic_id(TOPIC_JIRA))
 
 
 scheduler = BackgroundScheduler(timezone=BRT_TZ)
 scheduler.add_job(send_daily_digest, "cron", hour="8,19", minute=0, id="daily_digest")
 scheduler.add_job(check_recurring_payments, "cron", hour=9, minute=0, day="18", id="payment_reminder")
+scheduler.add_job(check_protesto_reminder, "cron", hour=9, minute=0, day="1", id="protesto_reminder")
 
 
 def _start_scheduler():
