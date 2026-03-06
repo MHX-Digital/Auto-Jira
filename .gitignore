@@ -1,7 +1,9 @@
 # Environment / Secrets
 .env
+.env-bot
 CHATGPT_AUTH.txt
 schema_gpt.txt
+texto1.txt
 
 # Python
 __pycache__/
