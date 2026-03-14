@@ -147,6 +147,12 @@ def _get_message_text(update):
     return msg.get("text", "")
 
 
+def _get_message_thread_id(update):
+    """Extrai message_thread_id para responder no topic correto (Forum Groups)."""
+    msg = update.get("message") or update.get("edited_message") or {}
+    return msg.get("message_thread_id")
+
+
 # ======================================================================
 # TELEGRAM — Send
 # ======================================================================
@@ -1315,6 +1321,7 @@ def webhook_telegram():
         return jsonify({"status": "ignored"}), 200
 
     chat_id = _get_chat_id(data)
+    topic_id = _get_message_thread_id(data)
     text = _get_message_text(data).strip()
 
     if not text or not chat_id:
@@ -1358,13 +1365,13 @@ def webhook_telegram():
             response = f"Comando desconhecido: {_esc(cmd)}\nDigite /help para ver comandos."
 
         if response:
-            tg_send(response, chat_id=chat_id)
+            tg_send(response, chat_id=chat_id, topic_id=topic_id)
 
     else:
         # Free text — Chat AI
         if _ai_enabled and OPENAI_API_KEY:
             ai_response = chat_ai(chat_id, text)
-            tg_send_plain(ai_response, chat_id=chat_id)
+            tg_send_plain(ai_response, chat_id=chat_id, topic_id=topic_id)
 
     return jsonify({"status": "ok"}), 200
 
