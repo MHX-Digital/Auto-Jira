@@ -8,12 +8,14 @@ e expoe API middleware para ChatGPT Actions.
 """
 
 import os
+import re
 import time
 import base64
 import logging
 import hashlib
 import hmac
-from collections import deque
+import threading
+from collections import deque, OrderedDict
 from datetime import datetime, timezone, timedelta
 
 import requests
@@ -26,6 +28,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # ======================================================================
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1 MB max request body
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -63,7 +67,6 @@ def _topic_id(env_val):
     return int(env_val) if env_val else None
 
 START_TIME = time.time()
-BRT = timezone(timedelta(hours=-3))
 BRT_TZ = pytz.timezone("America/Sao_Paulo")
 
 # Jira API auth headers
@@ -81,14 +84,23 @@ _msg_timestamps = deque(maxlen=60)
 RATE_LIMIT = 60
 RATE_WINDOW = 60
 
-# Chat AI — conversation history per chat_id
-_chat_history = {}
+# Chat AI — conversation history per chat_id (LRU, max 50 chats)
+_MAX_CHAT_SESSIONS = 50
+_chat_history = OrderedDict()
+_chat_lock = threading.Lock()
 _AI_MAX_MESSAGES = 20
 _ai_enabled = True
 
-# Dashboard cache
+# Dashboard cache (thread-safe)
+_dashboard_lock = threading.Lock()
 _dashboard_cache = {"html": "", "ts": 0}
 _DASHBOARD_CACHE_TTL = 300  # 5 minutes
+
+# Jira issue key pattern
+_ISSUE_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]+-\d+$")
+
+# Completed status variants (Jira pode retornar com ou sem acento)
+_DONE_STATUSES = {"Concluído", "Concluido"}
 
 
 # ======================================================================
@@ -96,7 +108,7 @@ _DASHBOARD_CACHE_TTL = 300  # 5 minutes
 # ======================================================================
 
 def _now_brt():
-    return datetime.now(BRT).strftime("%d/%m/%Y %H:%M")
+    return datetime.now(BRT_TZ).strftime("%d/%m/%Y %H:%M")
 
 
 def _esc(text):
@@ -108,19 +120,20 @@ def _esc(text):
 
 def _req(method, url, headers=None, **kw):
     """HTTP request with 1 retry on 5xx/connection errors."""
-    for i in range(2):
+    last_resp = None
+    for attempt in range(2):
         try:
-            r = requests.request(method, url, headers=headers, timeout=30, **kw)
-            if r.status_code >= 500 and i == 0:
+            last_resp = requests.request(method, url, headers=headers, timeout=30, **kw)
+            if last_resp.status_code >= 500 and attempt == 0:
                 time.sleep(1)
                 continue
-            return r
+            return last_resp
         except (requests.ConnectionError, requests.Timeout):
-            if i == 0:
+            if attempt == 0:
                 time.sleep(1)
                 continue
             raise
-    return r
+    return last_resp
 
 
 SEPARATOR = "\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014"
@@ -157,8 +170,27 @@ def _get_message_thread_id(update):
 # TELEGRAM — Send
 # ======================================================================
 
-def tg_send(text, chat_id=None, topic_id=None):
-    """Envia mensagem HTML via Telegram Bot API. Divide se > 4096 chars.
+def _split_message(text, limit=4000):
+    """Divide mensagem em chunks respeitando quebras de linha (evita cortar tags HTML)."""
+    if len(text) <= limit:
+        return [text]
+    chunks = []
+    while text:
+        if len(text) <= limit:
+            chunks.append(text)
+            break
+        # Tenta cortar na ultima quebra de linha antes do limite
+        cut = text.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+    return chunks
+
+
+def tg_send(text, chat_id=None, topic_id=None, parse_mode="HTML"):
+    """Envia mensagem via Telegram Bot API. Divide se > 4096 chars.
+    parse_mode: 'HTML', 'Markdown', ou None para plain text.
     topic_id: message_thread_id para Forum Topics (opcional).
     """
     target = chat_id or TELEGRAM_CHAT_ID
@@ -167,14 +199,15 @@ def tg_send(text, chat_id=None, topic_id=None):
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
+    chunks = _split_message(text)
     for chunk in chunks:
         payload = {
             "chat_id": target,
             "text": chunk,
-            "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         if topic_id:
             payload["message_thread_id"] = topic_id
         try:
@@ -189,32 +222,8 @@ def tg_send(text, chat_id=None, topic_id=None):
 
 
 def tg_send_plain(text, chat_id=None, topic_id=None):
-    """Envia mensagem plain text (sem parse_mode).
-    topic_id: message_thread_id para Forum Topics (opcional).
-    """
-    target = chat_id or TELEGRAM_CHAT_ID
-    if not TELEGRAM_BOT_TOKEN or not target:
-        return False
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
-    for chunk in chunks:
-        payload = {
-            "chat_id": target,
-            "text": chunk,
-            "disable_web_page_preview": True,
-        }
-        if topic_id:
-            payload["message_thread_id"] = topic_id
-        try:
-            r = requests.post(url, json=payload, timeout=15)
-            if r.status_code != 200:
-                log.error("Telegram erro: %s - %s", r.status_code, r.text[:300])
-                return False
-        except requests.RequestException as e:
-            log.error("Telegram request falhou: %s", e)
-            return False
-    return True
+    """Envia mensagem plain text (sem parse_mode)."""
+    return tg_send(text, chat_id=chat_id, topic_id=topic_id, parse_mode=None)
 
 
 def tg_send_photo(chat_id, photo_url, caption=""):
@@ -656,8 +665,8 @@ def cmd_status():
 
 
 def cmd_deadlines():
-    today = datetime.now(BRT).strftime("%Y-%m-%d")
-    in_7d = (datetime.now(BRT) + timedelta(days=7)).strftime("%Y-%m-%d")
+    today = datetime.now(BRT_TZ).strftime("%Y-%m-%d")
+    in_7d = (datetime.now(BRT_TZ) + timedelta(days=7)).strftime("%Y-%m-%d")
 
     jql_vencidas = (
         f'project={JIRA_PROJECT_KEY} AND status != "Concluido" '
@@ -776,27 +785,44 @@ Contexto: Jira project KAN (MHX Digital), Telegram group MHX.
 Responda em portugues. Seja conciso e direto."""
 
 
+_openai_client = None
+
+
+def _get_openai_client():
+    """Retorna singleton do OpenAI client."""
+    global _openai_client
+    if _openai_client is None:
+        from openai import OpenAI
+        _openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    return _openai_client
+
+
 def chat_ai(chat_id, user_message):
     """Processa mensagem via OpenAI e retorna resposta."""
     if not OPENAI_API_KEY:
         return "Chat AI nao configurado (OPENAI_API_KEY ausente)."
 
-    # Manage history
-    if chat_id not in _chat_history:
-        _chat_history[chat_id] = []
+    with _chat_lock:
+        if chat_id not in _chat_history:
+            # Evict oldest if at capacity
+            if len(_chat_history) >= _MAX_CHAT_SESSIONS:
+                _chat_history.popitem(last=False)
+            _chat_history[chat_id] = []
+        else:
+            # Move to end (most recently used)
+            _chat_history.move_to_end(chat_id)
 
-    history = _chat_history[chat_id]
-    history.append({"role": "user", "content": user_message})
+        history = _chat_history[chat_id]
+        history.append({"role": "user", "content": user_message})
 
-    # Sliding window
-    if len(history) > _AI_MAX_MESSAGES:
-        history[:] = history[-_AI_MAX_MESSAGES:]
+        # Sliding window
+        if len(history) > _AI_MAX_MESSAGES:
+            history[:] = history[-_AI_MAX_MESSAGES:]
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(history)
 
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = _get_openai_client()
         response = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=messages,
@@ -804,11 +830,15 @@ def chat_ai(chat_id, user_message):
             temperature=0.7,
         )
         assistant_msg = response.choices[0].message.content
-        history.append({"role": "assistant", "content": assistant_msg})
+
+        with _chat_lock:
+            if chat_id in _chat_history:
+                _chat_history[chat_id].append({"role": "assistant", "content": assistant_msg})
+
         return assistant_msg
     except Exception as e:
         log.error("OpenAI erro: %s", e)
-        return f"Erro ao processar mensagem: {e}"
+        return "Erro ao processar mensagem. Tente novamente."
 
 
 # ======================================================================
@@ -841,7 +871,7 @@ def _parse_issues(raw_issues):
 
 def _build_morning_digest(tasks, subtasks):
     """Seg-Sex manha: tarefas Em Andamento (conciso)."""
-    now = datetime.now(BRT)
+    now = datetime.now(BRT_TZ)
     data = now.strftime("%d/%m/%Y")
 
     andamento = [t for t in tasks if t["status"] == "Em andamento"]
@@ -870,20 +900,18 @@ def _build_morning_digest(tasks, subtasks):
 
 def _build_night_digest(tasks, subtasks):
     """Seg-Sex noite: tarefas concluidas HOJE (filtrado por resolutiondate)."""
-    now = datetime.now(BRT)
+    now = datetime.now(BRT_TZ)
     data = now.strftime("%d/%m/%Y")
     today_str = now.strftime("%Y-%m-%d")
 
     # Filtra apenas issues concluidas hoje pelo campo updated (proxy para data de conclusao)
     concluidos = [
         t for t in tasks
-        if (t["status"] == "Concluído" or t["status"] == "Concluido")
-        and t.get("updated", "")[:10] == today_str
+        if t["status"] in _DONE_STATUSES and t.get("updated", "")[:10] == today_str
     ]
     subs_concluidos = [
         s for s in subtasks
-        if (s["status"] == "Concluído" or s["status"] == "Concluido")
-        and s.get("updated", "")[:10] == today_str
+        if s["status"] in _DONE_STATUSES and s.get("updated", "")[:10] == today_str
     ]
     total = len(concluidos) + len(subs_concluidos)
 
@@ -903,25 +931,23 @@ def _build_night_digest(tasks, subtasks):
 
 def _build_weekly_report(tasks, subtasks):
     """Sabado manha: relatorio semanal — somente tarefas concluidas nos ultimos 7 dias."""
-    now = datetime.now(BRT)
+    now = datetime.now(BRT_TZ)
     data = now.strftime("%d/%m/%Y")
     week_ago = (now - timedelta(days=7)).strftime("%Y-%m-%d")
 
     # Filtra apenas issues concluidas NA SEMANA (updated >= 7 dias atras)
     concluidos = [
         t for t in tasks
-        if (t["status"] == "Concluído" or t["status"] == "Concluido")
-        and t.get("updated", "") >= week_ago
+        if t["status"] in _DONE_STATUSES and t.get("updated", "") >= week_ago
     ]
     subs_concluidos = [
         s for s in subtasks
-        if (s["status"] == "Concluído" or s["status"] == "Concluido")
-        and s.get("updated", "") >= week_ago
+        if s["status"] in _DONE_STATUSES and s.get("updated", "") >= week_ago
     ]
 
     # Contagens gerais (todas, nao filtradas por data)
-    all_concluidos = sum(1 for t in tasks if t["status"] in ("Concluído", "Concluido"))
-    all_concluidos += sum(1 for s in subtasks if s["status"] in ("Concluído", "Concluido"))
+    all_concluidos = sum(1 for t in tasks if t["status"] in _DONE_STATUSES)
+    all_concluidos += sum(1 for s in subtasks if s["status"] in _DONE_STATUSES)
     andamento = [t for t in tasks if t["status"] == "Em andamento"]
     afazer = [t for t in tasks if t["status"] == "A fazer"]
     em_analise = [t for t in tasks if t["status"] in ("Em análise", "Em analise")]
@@ -973,7 +999,7 @@ def _build_weekly_report(tasks, subtasks):
 
 def _build_sunday_planning(tasks, subtasks):
     """Domingo noite: planejamento da semana."""
-    now = datetime.now(BRT)
+    now = datetime.now(BRT_TZ)
     today = now.date()
 
     andamento = [t for t in tasks if t["status"] == "Em andamento"]
@@ -1036,7 +1062,7 @@ def send_daily_digest():
     Dom 08h: nao envia
     Dom 19h: planejamento da semana
     """
-    now = datetime.now(BRT)
+    now = datetime.now(BRT_TZ)
     weekday = now.weekday()  # 0=seg, 5=sab, 6=dom
     is_morning = now.hour < 12
 
@@ -1125,20 +1151,20 @@ a:hover { text-decoration: underline; }
 
 
 def build_dashboard_html():
-    """Gera dashboard HTML server-side."""
-    jql_all = f'project={JIRA_PROJECT_KEY} AND status != "Concluido" ORDER BY key ASC'
-    jql_done = f'project={JIRA_PROJECT_KEY} AND status = "Concluido"'
-    jql_andamento = f'project={JIRA_PROJECT_KEY} AND status = "Em andamento" ORDER BY key ASC'
+    """Gera dashboard HTML server-side (single Jira query)."""
+    jql_all = f'project={JIRA_PROJECT_KEY} ORDER BY key ASC'
+    all_fetched = jira_search(jql_all)
 
-    all_issues = jira_search(jql_all)
-    done_issues = jira_search(jql_done, fields="summary")
-    andamento = jira_search(jql_andamento)
+    # Classify locally instead of 3 separate queries
+    all_issues = [i for i in all_fetched if i["fields"]["status"]["name"] not in _DONE_STATUSES]
+    done_issues = [i for i in all_fetched if i["fields"]["status"]["name"] in _DONE_STATUSES]
+    andamento = [i for i in all_issues if i["fields"]["status"]["name"] == "Em andamento"]
 
     tasks_afazer = [i for i in all_issues
                     if i["fields"]["status"]["name"] == "A fazer"]
     tasks_andamento = andamento
 
-    today = datetime.now(BRT).date()
+    today = datetime.now(BRT_TZ).date()
     alertas = []
     for i in all_issues:
         dd = i["fields"].get("duedate")
@@ -1209,7 +1235,7 @@ def build_dashboard_html():
           <tbody>{arows}</tbody>
         </table>"""
 
-    now_str = datetime.now(BRT).strftime("%d/%m/%Y %H:%M:%S BRT")
+    now_str = datetime.now(BRT_TZ).strftime("%d/%m/%Y %H:%M:%S BRT")
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1275,10 +1301,10 @@ def health():
 
 @app.route("/webhook/jira", methods=["POST"])
 def webhook_jira():
-    # Validate secret
+    # Validate secret (timing-safe)
     if WEBHOOK_SECRET:
         header_secret = request.headers.get("X-Atlassian-Webhook-Identifier", "")
-        if header_secret and header_secret != WEBHOOK_SECRET:
+        if header_secret and not hmac.compare_digest(header_secret, WEBHOOK_SECRET):
             log.warning("Webhook secret invalido")
             return jsonify({"error": "unauthorized"}), 401
 
@@ -1375,7 +1401,8 @@ def webhook_telegram():
             send_daily_digest()
             response = "Digest enviado."
         elif cmd == "/clear":
-            _chat_history.pop(chat_id, None)
+            with _chat_lock:
+                _chat_history.pop(chat_id, None)
             response = "Historico de conversa limpo."
         elif cmd == "/ai":
             if args.strip().lower() == "off":
@@ -1409,13 +1436,15 @@ def webhook_telegram():
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     now = time.time()
-    if now - _dashboard_cache["ts"] < _DASHBOARD_CACHE_TTL and _dashboard_cache["html"]:
-        return Response(_dashboard_cache["html"], content_type="text/html")
+    with _dashboard_lock:
+        if now - _dashboard_cache["ts"] < _DASHBOARD_CACHE_TTL and _dashboard_cache["html"]:
+            return Response(_dashboard_cache["html"], content_type="text/html")
 
     try:
         html = build_dashboard_html()
-        _dashboard_cache["html"] = html
-        _dashboard_cache["ts"] = now
+        with _dashboard_lock:
+            _dashboard_cache["html"] = html
+            _dashboard_cache["ts"] = time.time()
         return Response(html, content_type="text/html")
     except Exception as e:
         log.error("Dashboard erro: %s", e)
@@ -1477,8 +1506,8 @@ def api_jira_deadlines():
     if auth_err:
         return auth_err
 
-    today = datetime.now(BRT).strftime("%Y-%m-%d")
-    in_7d = (datetime.now(BRT) + timedelta(days=7)).strftime("%Y-%m-%d")
+    today = datetime.now(BRT_TZ).strftime("%Y-%m-%d")
+    in_7d = (datetime.now(BRT_TZ) + timedelta(days=7)).strftime("%Y-%m-%d")
 
     vencidas = jira_search(
         f'project={JIRA_PROJECT_KEY} AND status != "Concluido" '
@@ -1508,6 +1537,8 @@ def api_jira_search():
     jql = request.args.get("jql", "")
     if not jql:
         return jsonify({"error": "jql parameter required"}), 400
+    if len(jql) > 1000:
+        return jsonify({"error": "jql too long (max 1000 chars)"}), 400
 
     issues = jira_search(jql)
     results = []
@@ -1531,6 +1562,9 @@ def api_jira_issue(key):
     auth_err = require_api_key()
     if auth_err:
         return auth_err
+
+    if not _ISSUE_KEY_RE.match(key):
+        return jsonify({"error": "invalid issue key format"}), 400
 
     issue = jira_get_issue(key)
     if not issue:
@@ -1603,6 +1637,9 @@ def api_jira_update_issue(key):
     if auth_err:
         return auth_err
 
+    if not _ISSUE_KEY_RE.match(key):
+        return jsonify({"error": "invalid issue key format"}), 400
+
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "json body required"}), 400
@@ -1638,6 +1675,9 @@ def api_jira_transition(key):
     auth_err = require_api_key()
     if auth_err:
         return auth_err
+
+    if not _ISSUE_KEY_RE.match(key):
+        return jsonify({"error": "invalid issue key format"}), 400
 
     data = request.get_json(silent=True)
     if not data or "transition_id" not in data:
@@ -1693,7 +1733,8 @@ def api_telegram_send():
         r = requests.post(url, json=payload, timeout=15)
         return jsonify(r.json()), r.status_code
     except requests.RequestException as e:
-        return jsonify({"error": str(e)}), 500
+        log.error("Telegram send API erro: %s", e)
+        return jsonify({"error": "failed to send message"}), 500
 
 
 @app.route("/api/telegram/send-photo", methods=["POST"])
@@ -1794,7 +1835,8 @@ def api_telegram_updates():
             data["result"] = filtered
         return jsonify(data)
     except requests.RequestException as e:
-        return jsonify({"error": str(e)}), 500
+        log.error("Telegram updates API erro: %s", e)
+        return jsonify({"error": "failed to fetch updates"}), 500
 
 
 # ======================================================================
@@ -1835,7 +1877,7 @@ def cron_daily_digest():
         return jsonify({"status": "ok", "message": "daily digest sent", "timestamp": _now_brt()})
     except Exception as e:
         log.error("[CRON] Daily digest failed: %s", e)
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({"status": "error", "message": "digest failed — check logs"}), 500
 
 
 @app.route("/cron/test", methods=["GET", "POST"])
@@ -1855,7 +1897,7 @@ def cron_test():
         tasks, subtasks = _parse_issues(raw)
 
         # Build the digest that would be sent right now
-        now = datetime.now(BRT)
+        now = datetime.now(BRT_TZ)
         weekday = now.weekday()
         is_morning = now.hour < 12
 
@@ -1880,7 +1922,7 @@ def cron_test():
         })
     except Exception as e:
         log.error("[CRON] Test digest failed: %s", e)
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({"status": "error", "message": "test failed — check logs"}), 500
 
 
 # ======================================================================
