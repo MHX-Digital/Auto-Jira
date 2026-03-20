@@ -275,7 +275,7 @@ def check_rate_limit():
 # JIRA API HELPERS
 # ======================================================================
 
-def jira_search(jql, fields="summary,status,issuetype,parent,duedate,labels,components,assignee,priority", max_results=100):
+def jira_search(jql, fields="summary,status,issuetype,parent,duedate,labels,components,assignee,priority,updated", max_results=100):
     """Busca issues via Jira REST API com paginacao."""
     if not JIRA_HEADERS:
         log.error("Jira auth nao configurada (JIRA_EMAIL / JIRA_API_TOKEN)")
@@ -828,6 +828,7 @@ def _parse_issues(raw_issues):
             "type": f["issuetype"]["name"],
             "parent": f.get("parent", {}).get("key") if f.get("parent") else None,
             "duedate": f.get("duedate"),
+            "updated": (f.get("updated") or "")[:10],
             "labels": f.get("labels", []),
             "components": [c["name"] for c in f.get("components", [])],
         }
@@ -868,13 +869,22 @@ def _build_morning_digest(tasks, subtasks):
 
 
 def _build_night_digest(tasks, subtasks):
-    """Seg-Sex noite: tarefas concluidas hoje."""
+    """Seg-Sex noite: tarefas concluidas HOJE (filtrado por resolutiondate)."""
     now = datetime.now(BRT)
     data = now.strftime("%d/%m/%Y")
     today_str = now.strftime("%Y-%m-%d")
 
-    concluidos = [t for t in tasks if t["status"] == "Concluído" or t["status"] == "Concluido"]
-    subs_concluidos = [s for s in subtasks if s["status"] == "Concluído" or s["status"] == "Concluido"]
+    # Filtra apenas issues concluidas hoje pelo campo updated (proxy para data de conclusao)
+    concluidos = [
+        t for t in tasks
+        if (t["status"] == "Concluído" or t["status"] == "Concluido")
+        and t.get("updated", "")[:10] == today_str
+    ]
+    subs_concluidos = [
+        s for s in subtasks
+        if (s["status"] == "Concluído" or s["status"] == "Concluido")
+        and s.get("updated", "")[:10] == today_str
+    ]
     total = len(concluidos) + len(subs_concluidos)
 
     if total == 0:
@@ -892,37 +902,53 @@ def _build_night_digest(tasks, subtasks):
 
 
 def _build_weekly_report(tasks, subtasks):
-    """Sabado manha: relatorio semanal (dom-sab)."""
+    """Sabado manha: relatorio semanal — somente tarefas concluidas nos ultimos 7 dias."""
     now = datetime.now(BRT)
     data = now.strftime("%d/%m/%Y")
+    week_ago = (now - timedelta(days=7)).strftime("%Y-%m-%d")
 
-    concluidos = [t for t in tasks if t["status"] == "Concluído" or t["status"] == "Concluido"]
-    subs_concluidos = [s for s in subtasks if s["status"] == "Concluído" or s["status"] == "Concluido"]
+    # Filtra apenas issues concluidas NA SEMANA (updated >= 7 dias atras)
+    concluidos = [
+        t for t in tasks
+        if (t["status"] == "Concluído" or t["status"] == "Concluido")
+        and t.get("updated", "") >= week_ago
+    ]
+    subs_concluidos = [
+        s for s in subtasks
+        if (s["status"] == "Concluído" or s["status"] == "Concluido")
+        and s.get("updated", "") >= week_ago
+    ]
+
+    # Contagens gerais (todas, nao filtradas por data)
+    all_concluidos = sum(1 for t in tasks if t["status"] in ("Concluído", "Concluido"))
+    all_concluidos += sum(1 for s in subtasks if s["status"] in ("Concluído", "Concluido"))
     andamento = [t for t in tasks if t["status"] == "Em andamento"]
     afazer = [t for t in tasks if t["status"] == "A fazer"]
-    em_analise = [t for t in tasks if t["status"] == "Em análise" or t["status"] == "Em analise"]
-    total_concluidos = len(concluidos) + len(subs_concluidos)
+    em_analise = [t for t in tasks if t["status"] in ("Em análise", "Em analise")]
+    total_semana = len(concluidos) + len(subs_concluidos)
 
     lines = [
         f"RELATORIO SEMANAL | {data}",
         "=" * 30,
         "",
-        f"Concluidas: {total_concluidos}",
+        f"Concluidas esta semana: {total_semana}",
+        f"Total concluidas (geral): {all_concluidos}",
         f"Em andamento: {len(andamento)}",
         f"Em analise: {len(em_analise)}",
         f"A fazer: {len(afazer)}",
         "",
     ]
 
-    if concluidos:
-        lines.append("Concluidas na semana:")
+    if concluidos or subs_concluidos:
+        lines.append("Concluidas esta semana:")
         for t in concluidos:
             lines.append(f"  {t['key']} {t['summary'][:50]}")
-    if subs_concluidos:
         for s in subs_concluidos:
-            lines.append(f"  {s['key']} {s['summary'][:45]}")
-
-    if concluidos or subs_concluidos:
+            parent = f" ({s['parent']})" if s["parent"] else ""
+            lines.append(f"  {s['key']} {s['summary'][:45]}{parent}")
+        lines.append("")
+    else:
+        lines.append("Nenhuma tarefa concluida esta semana.")
         lines.append("")
 
     # Alertas de deadline
@@ -1304,7 +1330,7 @@ def webhook_telegram():
     # Validate Telegram webhook secret
     if TELEGRAM_WEBHOOK_SECRET:
         header_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-        if header_secret != TELEGRAM_WEBHOOK_SECRET:
+        if not hmac.compare_digest(header_secret, TELEGRAM_WEBHOOK_SECRET):
             log.warning("Telegram webhook secret invalido")
             return jsonify({"error": "unauthorized"}), 401
 
@@ -1393,7 +1419,7 @@ def dashboard():
         return Response(html, content_type="text/html")
     except Exception as e:
         log.error("Dashboard erro: %s", e)
-        return Response(f"<h1>Erro ao carregar dashboard</h1><p>{e}</p>",
+        return Response("<h1>Erro ao carregar dashboard</h1><p>Erro interno.</p>",
                         content_type="text/html", status=500)
 
 
@@ -1821,13 +1847,26 @@ def cron_test():
 
     log.info("[CRON] Test digest requested")
     try:
-        jql = f'project={JIRA_PROJECT_KEY} AND status != "Concluido" ORDER BY key ASC'
+        jql = f'project={JIRA_PROJECT_KEY} ORDER BY key ASC'
         raw = jira_search(jql)
         if not raw:
-            return jsonify({"status": "ok", "message": "no issues found", "msg1": "", "msg2": ""})
+            return jsonify({"status": "ok", "message": "no issues found", "digest": ""})
 
         tasks, subtasks = _parse_issues(raw)
-        msg1, msg2 = _build_digest_messages(tasks, subtasks)
+
+        # Build the digest that would be sent right now
+        now = datetime.now(BRT)
+        weekday = now.weekday()
+        is_morning = now.hour < 12
+
+        if weekday == 5 and is_morning:
+            digest = _build_weekly_report(tasks, subtasks)
+        elif weekday == 6 and not is_morning:
+            digest = _build_sunday_planning(tasks, subtasks)
+        elif is_morning:
+            digest = _build_morning_digest(tasks, subtasks)
+        else:
+            digest = _build_night_digest(tasks, subtasks)
 
         return jsonify({
             "status": "ok",
@@ -1835,8 +1874,8 @@ def cron_test():
             "total_issues": len(raw),
             "total_tasks": len(tasks),
             "total_subtasks": len(subtasks),
-            "msg1_preview": msg1[:500],
-            "msg2_preview": msg2[:500],
+            "digest_preview": digest[:1000],
+            "digest_type": f"{'sab' if weekday==5 else 'dom' if weekday==6 else 'seg-sex'} {'manha' if is_morning else 'noite'}",
             "timestamp": _now_brt(),
         })
     except Exception as e:
