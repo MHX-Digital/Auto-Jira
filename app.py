@@ -102,6 +102,11 @@ _ISSUE_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]+-\d+$")
 # Completed status variants (Jira pode retornar com ou sem acento)
 _DONE_STATUSES = {"Concluído", "Concluido"}
 
+# Dedup: suppress duplicate notifications for same issue within window
+_DEDUP_WINDOW = 5  # seconds
+_recent_notifications = {}  # key -> (timestamp, event_type)
+_dedup_lock = threading.Lock()
+
 
 # ======================================================================
 # HELPERS
@@ -1335,6 +1340,23 @@ def webhook_jira():
     if not message:
         log.info("Sem mudancas relevantes no changelog")
         return jsonify({"status": "ignored", "reason": "no relevant changes"}), 200
+
+    # Dedup: suppress rapid-fire notifications for same issue (e.g. PUT + comment in < 5s)
+    now = time.time()
+    with _dedup_lock:
+        # Cleanup old entries
+        expired = [k for k, (ts, _) in _recent_notifications.items() if now - ts > _DEDUP_WINDOW * 2]
+        for k in expired:
+            del _recent_notifications[k]
+
+        last = _recent_notifications.get(issue_key)
+        if last and now - last[0] < _DEDUP_WINDOW:
+            log.info("Dedup: %s [%s] suprimido (ultimo evento %s ha %.1fs)",
+                     issue_key, event, last[1], now - last[0])
+            _recent_notifications[issue_key] = (now, event)
+            return jsonify({"status": "deduped", "reason": "rapid-fire suppressed"}), 200
+
+        _recent_notifications[issue_key] = (now, event)
 
     ok = tg_send(message, topic_id=_topic_id(TOPIC_JIRA))
     if ok:
