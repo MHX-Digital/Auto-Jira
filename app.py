@@ -10,13 +10,13 @@ e expoe API middleware para ChatGPT Actions.
 import os
 import re
 import time
+import atexit
 import base64
 import logging
-import hashlib
 import hmac
 import threading
 from collections import deque, OrderedDict
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 
 import requests
 import pytz
@@ -79,8 +79,9 @@ if JIRA_EMAIL and JIRA_API_TOKEN:
         "Accept": "application/json",
     }
 
-# Rate limit: max 60 msgs/min
+# Rate limit: max 60 msgs/min (thread-safe)
 _msg_timestamps = deque(maxlen=60)
+_rate_lock = threading.Lock()
 RATE_LIMIT = 60
 RATE_WINDOW = 60
 
@@ -99,8 +100,9 @@ _DASHBOARD_CACHE_TTL = 300  # 5 minutes
 # Jira issue key pattern
 _ISSUE_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]+-\d+$")
 
-# Completed status variants (Jira pode retornar com ou sem acento)
+# Status variants (Jira pode retornar com ou sem acento)
 _DONE_STATUSES = {"Concluído", "Concluido"}
+_ANALYSIS_STATUSES = {"Em análise", "Em analise"}
 
 # Dedup: suppress duplicate notifications for same issue within window
 _DEDUP_WINDOW = 5  # seconds
@@ -275,14 +277,15 @@ def tg_send_poll(chat_id, question, options):
 
 
 def check_rate_limit():
-    """Retorna True se dentro do limite."""
+    """Retorna True se dentro do limite (thread-safe)."""
     now = time.time()
-    while _msg_timestamps and _msg_timestamps[0] < now - RATE_WINDOW:
-        _msg_timestamps.popleft()
-    if len(_msg_timestamps) >= RATE_LIMIT:
-        return False
-    _msg_timestamps.append(now)
-    return True
+    with _rate_lock:
+        while _msg_timestamps and _msg_timestamps[0] < now - RATE_WINDOW:
+            _msg_timestamps.popleft()
+        if len(_msg_timestamps) >= RATE_LIMIT:
+            return False
+        _msg_timestamps.append(now)
+        return True
 
 
 # ======================================================================
@@ -641,13 +644,12 @@ def cmd_help():
 
 
 def cmd_status():
-    jql_andamento = f'project={JIRA_PROJECT_KEY} AND status="Em andamento" ORDER BY key ASC'
-    jql_afazer = f'project={JIRA_PROJECT_KEY} AND status="A fazer" ORDER BY key ASC'
-    jql_concluido = f'project={JIRA_PROJECT_KEY} AND status="Concluido" ORDER BY updated DESC'
+    jql = f'project={JIRA_PROJECT_KEY} ORDER BY key ASC'
+    all_issues = jira_search(jql)
 
-    em_andamento = jira_search(jql_andamento)
-    a_fazer = jira_search(jql_afazer)
-    concluido = jira_search(jql_concluido)
+    em_andamento = [i for i in all_issues if i["fields"]["status"]["name"] == "Em andamento"]
+    a_fazer = [i for i in all_issues if i["fields"]["status"]["name"] == "A fazer"]
+    concluido = [i for i in all_issues if i["fields"]["status"]["name"] in _DONE_STATUSES]
 
     lines = [
         f"<b>Jira {JIRA_PROJECT_KEY} - Status</b>",
@@ -670,8 +672,9 @@ def cmd_status():
 
 
 def cmd_deadlines():
-    today = datetime.now(BRT_TZ).strftime("%Y-%m-%d")
-    in_7d = (datetime.now(BRT_TZ) + timedelta(days=7)).strftime("%Y-%m-%d")
+    now = datetime.now(BRT_TZ)
+    today = now.strftime("%Y-%m-%d")
+    in_7d = (now + timedelta(days=7)).strftime("%Y-%m-%d")
 
     jql_vencidas = (
         f'project={JIRA_PROJECT_KEY} AND status != "Concluido" '
@@ -955,7 +958,7 @@ def _build_weekly_report(tasks, subtasks):
     all_concluidos += sum(1 for s in subtasks if s["status"] in _DONE_STATUSES)
     andamento = [t for t in tasks if t["status"] == "Em andamento"]
     afazer = [t for t in tasks if t["status"] == "A fazer"]
-    em_analise = [t for t in tasks if t["status"] in ("Em análise", "Em analise")]
+    em_analise = [t for t in tasks if t["status"] in _ANALYSIS_STATUSES]
     total_semana = len(concluidos) + len(subs_concluidos)
 
     lines = [
@@ -1008,7 +1011,7 @@ def _build_sunday_planning(tasks, subtasks):
     today = now.date()
 
     andamento = [t for t in tasks if t["status"] == "Em andamento"]
-    em_analise = [t for t in tasks if t["status"] == "Em análise" or t["status"] == "Em analise"]
+    em_analise = [t for t in tasks if t["status"] in _ANALYSIS_STATUSES]
 
     # Tasks com deadline na proxima semana (7 dias)
     urgentes = []
@@ -1184,17 +1187,19 @@ def build_dashboard_html():
 
     # Build cards
     total = len(all_issues) + len(done_issues)
+    n_overdue = sum(1 for a in alertas if a["type"] == "overdue")
+    n_upcoming = sum(1 for a in alertas if a["type"] == "upcoming")
     cards_html = f"""
     <div class="cards">
       <div class="card"><div class="number">{total}</div><div class="label">Total Issues</div></div>
       <div class="card"><div class="number">{len(tasks_andamento)}</div><div class="label">Em Andamento</div></div>
       <div class="card"><div class="number">{len(tasks_afazer)}</div><div class="label">A Fazer</div></div>
       <div class="card"><div class="number">{len(done_issues)}</div><div class="label">Concluido</div></div>
-      <div class="card {"danger" if len([a for a in alertas if a["type"]=="overdue"]) > 0 else ""}">
-        <div class="number">{len([a for a in alertas if a["type"]=="overdue"])}</div>
+      <div class="card {"danger" if n_overdue else ""}">
+        <div class="number">{n_overdue}</div>
         <div class="label">Atrasadas</div></div>
-      <div class="card {"warning" if len([a for a in alertas if a["type"]=="upcoming"]) > 0 else ""}">
-        <div class="number">{len([a for a in alertas if a["type"]=="upcoming"])}</div>
+      <div class="card {"warning" if n_upcoming else ""}">
+        <div class="number">{n_upcoming}</div>
         <div class="label">Vencendo (7d)</div></div>
     </div>"""
 
@@ -1500,24 +1505,27 @@ def api_jira_status():
     if auth_err:
         return auth_err
 
-    jql_all = f'project={JIRA_PROJECT_KEY} AND status != "Concluido" ORDER BY key ASC'
-    jql_done = f'project={JIRA_PROJECT_KEY} AND status = "Concluido"'
-    issues = jira_search(jql_all)
-    done = jira_search(jql_done, fields="summary")
+    jql = f'project={JIRA_PROJECT_KEY} ORDER BY key ASC'
+    all_fetched = jira_search(jql)
 
+    active = []
+    done_count = 0
     by_status = {}
-    for i in issues:
+    for i in all_fetched:
         st = i["fields"]["status"]["name"]
-        by_status.setdefault(st, []).append({
-            "key": i["key"],
-            "summary": i["fields"]["summary"],
-        })
+        entry = {"key": i["key"], "summary": i["fields"]["summary"]}
+        if st in _DONE_STATUSES:
+            done_count += 1
+            by_status.setdefault(st, []).append(entry)
+        else:
+            active.append(i)
+            by_status.setdefault(st, []).append(entry)
 
     return jsonify({
         "project": JIRA_PROJECT_KEY,
-        "total": len(issues) + len(done),
-        "done": len(done),
-        "active": len(issues),
+        "total": len(all_fetched),
+        "done": done_count,
+        "active": len(active),
         "by_status": {k: {"count": len(v), "issues": v} for k, v in by_status.items()},
     })
 
@@ -1528,8 +1536,9 @@ def api_jira_deadlines():
     if auth_err:
         return auth_err
 
-    today = datetime.now(BRT_TZ).strftime("%Y-%m-%d")
-    in_7d = (datetime.now(BRT_TZ) + timedelta(days=7)).strftime("%Y-%m-%d")
+    now = datetime.now(BRT_TZ)
+    today = now.strftime("%Y-%m-%d")
+    in_7d = (now + timedelta(days=7)).strftime("%Y-%m-%d")
 
     vencidas = jira_search(
         f'project={JIRA_PROJECT_KEY} AND status != "Concluido" '
@@ -1747,7 +1756,7 @@ def api_telegram_send():
             "whale": TOPIC_WHALE, "crypto": TOPIC_CRYPTO, "panic": TOPIC_PANIC,
             "clients": TOPIC_CLIENTS, "docs": TOPIC_DOCS,
         }
-        tid = _topic_id(topic_map.get(data["topic"].lower(), ""))
+        tid = _topic_id(topic_map.get(str(data["topic"]).lower(), ""))
         if tid:
             payload["message_thread_id"] = tid
 
@@ -1957,7 +1966,6 @@ def check_recurring_payments():
     if today.day != 18:
         return
     log.info("Dia 18 — enviando lembrete de parcelas dia 20")
-    next_month = today.strftime("%B/%Y")
     msg = (
         f"\u26a0\ufe0f LEMBRETE PARCELAS — Vencimento dia 20\n"
         f"{SEPARATOR}\n"
@@ -2002,9 +2010,10 @@ scheduler.add_job(check_protesto_reminder, "cron", hour=9, minute=0, day="1", id
 
 
 def _start_scheduler():
-    """Inicia APScheduler com logging claro."""
+    """Inicia APScheduler com logging claro e graceful shutdown."""
     try:
         scheduler.start()
+        atexit.register(lambda: scheduler.shutdown(wait=False))
         jobs = scheduler.get_jobs()
         log.info("=" * 50)
         log.info("APScheduler iniciado com %d job(s):", len(jobs))
