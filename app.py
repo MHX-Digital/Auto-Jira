@@ -1061,6 +1061,7 @@ def _build_sunday_planning(tasks, subtasks):
 
 
 _last_digest_sent = {"ts": 0.0}
+_digest_dedup_lock = threading.Lock()
 _DIGEST_DEDUP_WINDOW = 300  # 5 minutes — suppress duplicate digest triggers
 
 
@@ -1075,11 +1076,13 @@ def send_daily_digest():
     Dom 19h: planejamento da semana
 
     Dedup: ignores calls within 5 min of last successful send.
+    Returns True if digest was sent, False if suppressed/skipped.
     """
     now_ts = time.time()
-    if now_ts - _last_digest_sent["ts"] < _DIGEST_DEDUP_WINDOW:
-        log.info("Digest dedup: suprimido (ultimo envio ha %.0fs)", now_ts - _last_digest_sent["ts"])
-        return
+    with _digest_dedup_lock:
+        if now_ts - _last_digest_sent["ts"] < _DIGEST_DEDUP_WINDOW:
+            log.info("Digest dedup: suprimido (ultimo envio ha %.0fs)", now_ts - _last_digest_sent["ts"])
+            return False
 
     now = datetime.now(BRT_TZ)
     weekday = now.weekday()  # 0=seg, 5=sab, 6=dom
@@ -1089,7 +1092,7 @@ def send_daily_digest():
     if (weekday == 5 and not is_morning) or (weekday == 6 and is_morning):
         log.info("Digest suprimido: %s %s", ["seg","ter","qua","qui","sex","sab","dom"][weekday],
                  "manha" if is_morning else "noite")
-        return
+        return False
 
     log.info("Enviando digest: %s %s", ["seg","ter","qua","qui","sex","sab","dom"][weekday],
              "manha" if is_morning else "noite")
@@ -1124,12 +1127,16 @@ def send_daily_digest():
         ok = tg_send_plain(msg, topic_id=jira_topic)
 
         if ok:
-            _last_digest_sent["ts"] = time.time()
+            with _digest_dedup_lock:
+                _last_digest_sent["ts"] = time.time()
             log.info("Digest enviado com sucesso")
+            return True
         else:
             log.error("Digest: falha no envio")
+            return False
     except Exception as e:
         log.error("Digest erro: %s", e)
+        return False
 
 
 # ======================================================================
@@ -1916,8 +1923,10 @@ def cron_daily_digest():
 
     log.info("[CRON] Daily digest triggered via HTTP")
     try:
-        send_daily_digest()
-        return jsonify({"status": "ok", "message": "daily digest sent", "timestamp": _now_brt()})
+        sent = send_daily_digest()
+        if sent:
+            return jsonify({"status": "ok", "message": "daily digest sent", "timestamp": _now_brt()})
+        return jsonify({"status": "ok", "message": "digest skipped (dedup or suppressed)", "timestamp": _now_brt()})
     except Exception as e:
         log.error("[CRON] Daily digest failed: %s", e)
         return jsonify({"status": "error", "message": "digest failed — check logs"}), 500
