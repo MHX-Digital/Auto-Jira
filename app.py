@@ -1060,6 +1060,10 @@ def _build_sunday_planning(tasks, subtasks):
     return "\n".join(lines)
 
 
+_last_digest_sent = {"ts": 0.0}
+_DIGEST_DEDUP_WINDOW = 300  # 5 minutes — suppress duplicate digest triggers
+
+
 def send_daily_digest():
     """Envia digest contextual baseado no dia/horario.
 
@@ -1069,7 +1073,14 @@ def send_daily_digest():
     Sab 19h: nao envia
     Dom 08h: nao envia
     Dom 19h: planejamento da semana
+
+    Dedup: ignores calls within 5 min of last successful send.
     """
+    now_ts = time.time()
+    if now_ts - _last_digest_sent["ts"] < _DIGEST_DEDUP_WINDOW:
+        log.info("Digest dedup: suprimido (ultimo envio ha %.0fs)", now_ts - _last_digest_sent["ts"])
+        return
+
     now = datetime.now(BRT_TZ)
     weekday = now.weekday()  # 0=seg, 5=sab, 6=dom
     is_morning = now.hour < 12
@@ -1113,6 +1124,7 @@ def send_daily_digest():
         ok = tg_send_plain(msg, topic_id=jira_topic)
 
         if ok:
+            _last_digest_sent["ts"] = time.time()
             log.info("Digest enviado com sucesso")
         else:
             log.error("Digest: falha no envio")
@@ -2004,7 +2016,8 @@ def check_protesto_reminder():
 
 
 scheduler = BackgroundScheduler(timezone=BRT_TZ)
-scheduler.add_job(send_daily_digest, "cron", hour="8,19", minute=0, id="daily_digest")
+# Daily digest: triggered ONLY by external cron (cron-job.org) via /cron/daily-digest.
+# Removed from APScheduler to prevent duplicate messages.
 scheduler.add_job(check_recurring_payments, "cron", hour=9, minute=0, day="18", id="payment_reminder")
 scheduler.add_job(check_protesto_reminder, "cron", hour=9, minute=0, day="1", id="protesto_reminder")
 
