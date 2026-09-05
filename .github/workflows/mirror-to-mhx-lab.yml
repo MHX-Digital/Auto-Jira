@@ -1,0 +1,18 @@
+name: Mirror to mhx-lab
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  mirror:
+    runs-on: [self-hosted, mhx-lab-mirror]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Sync working tree to ~/portfolio
+        run: |
+          DEST="$HOME/portfolio/${{ github.repository }}"
+          mkdir -p "$(dirname "$DEST")"
+          rsync -a --delete             --exclude 'node_modules' --exclude '.next' --exclude 'dist'             --exclude 'build' --exclude '__pycache__' --exclude '.venv'             "$GITHUB_WORKSPACE/" "$DEST/"
