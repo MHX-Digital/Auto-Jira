@@ -13,6 +13,6 @@ jobs:
           persist-credentials: false
       - name: Sync working tree to ~/portfolio
         run: |
-          DEST="$HOME/portfolio/${{ github.repository }}"
+          DEST="/home/mhx/projects/${{ github.event.repository.name }}"
           mkdir -p "$(dirname "$DEST")"
           rsync -a --delete             --exclude 'node_modules' --exclude '.next' --exclude 'dist'             --exclude 'build' --exclude '__pycache__' --exclude '.venv'             "$GITHUB_WORKSPACE/" "$DEST/"
